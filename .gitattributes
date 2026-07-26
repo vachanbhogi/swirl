@@ -1,0 +1,10 @@
+# Recognize Jaclang files
+*.jac linguist-language=Jac
+*.jac linguist-detectable=true
+
+# Vendor generated schema and package lock files so they don't count toward JS/JSON stats
+frontend/package-lock.json linguist-vendored
+frontend/src-tauri/Cargo.lock linguist-vendored
+frontend/src-tauri/gen/schemas/*.json linguist-vendored
+frontend/src-tauri/capabilities/*.json linguist-vendored
+backend/fixtures/*.json linguist-documentation
