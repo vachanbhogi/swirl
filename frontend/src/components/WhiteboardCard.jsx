@@ -70,6 +70,7 @@ export default function WhiteboardCard({
   const handleMouseDown = (e) => {
     if (
       e.target === canvasRef.current ||
+      e.target.classList.contains('canvas-viewport') ||
       e.target.tagName === 'svg' ||
       e.target.classList.contains('canvas-bg') ||
       e.target.classList.contains('canvas-grid-figma')
@@ -201,7 +202,7 @@ export default function WhiteboardCard({
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: '0 0'
           }}
-          className="absolute inset-0 w-full h-full pointer-events-auto"
+          className="absolute inset-0 w-full h-full pointer-events-auto canvas-viewport"
         >
           {/* SVG Dotted Connection Wires Layer */}
           <svg className="absolute inset-0 w-[6000px] h-[6000px] pointer-events-none z-0">
