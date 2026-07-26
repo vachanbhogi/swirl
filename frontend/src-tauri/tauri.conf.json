@@ -24,6 +24,22 @@
         "transparent": true,
         "titleBarStyle": "Overlay",
         "decorations": true
+      },
+      {
+        "label": "notch",
+        "title": "Swirl Notch Overlay",
+        "url": "/#/notch",
+        "width": 180,
+        "height": 44,
+        "resizable": false,
+        "fullscreen": false,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "center": false
       }
     ],
     "security": {

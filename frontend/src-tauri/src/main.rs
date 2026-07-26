@@ -511,12 +511,59 @@ fn delete_workflow(app: AppHandle, name: String) -> Result<bool, String> {
     storage::delete_workflow(&app, &name)
 }
 
+#[tauri::command]
+fn toggle_notch(app: AppHandle) -> Result<bool, String> {
+    if let Some(notch_window) = app.get_webview_window("notch") {
+        let is_visible = notch_window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = notch_window.hide();
+            Ok(false)
+        } else {
+            let _ = notch_window.show();
+            Ok(true)
+        }
+    } else {
+        Err("Notch window not found".into())
+    }
+}
+
 fn main() {
+    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             app.manage(McpState(std::sync::Mutex::new(McpManager::load(
                 app.handle(),
             ))));
+
+            if let Some(notch_win) = app.get_webview_window("notch") {
+                if let Ok(Some(monitor)) = notch_win.primary_monitor() {
+                    let size = monitor.size();
+                    let scale = monitor.scale_factor();
+                    let screen_width = (size.width as f64) / scale;
+                    let notch_x = (screen_width - 180.0) / 2.0;
+                    let _ = notch_win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                        x: notch_x,
+                        y: 0.0,
+                    }));
+                }
+            }
+
+            let shortcut_space = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER), Code::Space);
+            let app_handle = app.handle().clone();
+            let _ = app.global_shortcut().on_shortcut(shortcut_space, move |_app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Some(notch_win) = app_handle.get_webview_window("notch") {
+                        if notch_win.is_visible().unwrap_or(false) {
+                            let _ = notch_win.hide();
+                        } else {
+                            let _ = notch_win.show();
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -535,7 +582,8 @@ fn main() {
             save_workflow,
             load_workflow,
             list_workflows,
-            delete_workflow
+            delete_workflow,
+            toggle_notch
         ])
         .build(tauri::generate_context!())
         .expect("error while building Swirl Tauri desktop application");
