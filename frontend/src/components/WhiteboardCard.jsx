@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   ZoomIn, 
   ZoomOut, 
@@ -18,6 +18,21 @@ import {
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
 
 const ICON_MAP = { Zap, Sparkles, Command, Plug, GitBranch, Send, Radio };
+const NODE_WIDTH = 270;
+const PORT_CENTER_Y = 42;
+const GRID_SIZE = 24;
+
+const getWirePath = (source, target) => {
+  const horizontalGap = target.x - source.x;
+  const bend = Math.min(220, Math.max(72, Math.abs(horizontalGap) * 0.5));
+
+  return [
+    `M ${source.x} ${source.y}`,
+    `C ${source.x + bend} ${source.y},`,
+    `${target.x - bend} ${target.y},`,
+    `${target.x} ${target.y}`
+  ].join(' ');
+};
 
 export default function WhiteboardCard({
   nodes,
@@ -39,41 +54,32 @@ export default function WhiteboardCard({
 
   const panRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
   const canvasRef = useRef(null);
-  const moveRef = useRef({ rect: null, event: null, rafId: null });
-
-  useEffect(() => () => {
-    if (moveRef.current.rafId) cancelAnimationFrame(moveRef.current.rafId);
-  }, []);
 
   // Mouse move handler for canvas panning, node dragging, and wire previews
   const handleMouseMove = (e) => {
     if (!canvasRef.current) return;
-    moveRef.current.event = e;
-    moveRef.current.rect ||= canvasRef.current.getBoundingClientRect();
-    if (moveRef.current.rafId) return;
-    moveRef.current.rafId = requestAnimationFrame(() => {
-      moveRef.current.rafId = null;
-      const event = moveRef.current.event;
-      const rect = moveRef.current.rect;
-      if (!event || !rect) return;
-      const currentX = (event.clientX - rect.left - pan.x) / zoom;
-      const currentY = (event.clientY - rect.top - pan.y) / zoom;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const currentX = (e.clientX - rect.left - pan.x) / zoom;
+    const currentY = (e.clientY - rect.top - pan.y) / zoom;
 
-      if (draggingNodeId) {
-        setNodes((prevNodes) => prevNodes.map((n) =>
+    setMousePos({ x: currentX, y: currentY });
+
+    if (draggingNodeId) {
+      setNodes((prevNodes) =>
+        prevNodes.map((n) =>
           n.id === draggingNodeId
-            ? { ...n, position: { x: Math.round(currentX - dragOffset.x), y: Math.round(currentY - dragOffset.y) } }
+            ? { ...n, x: currentX - dragOffset.x, y: currentY - dragOffset.y }
             : n
-        ));
-      } else if (isPanning) {
-        setPan({
-          x: panRef.current.initialX + event.clientX - panRef.current.startX,
-          y: panRef.current.initialY + event.clientY - panRef.current.startY
-        });
-      }
-
-      if (connectingPort) setMousePos({ x: currentX, y: currentY });
-    });
+        )
+      );
+    } else if (isPanning) {
+      const dx = e.clientX - panRef.current.startX;
+      const dy = e.clientY - panRef.current.startY;
+      setPan({
+        x: panRef.current.initialX + dx,
+        y: panRef.current.initialY + dy
+      });
+    }
   };
 
   const handleMouseDown = (e) => {
@@ -95,8 +101,6 @@ export default function WhiteboardCard({
   };
 
   const handleMouseUp = () => {
-    moveRef.current.event = null;
-    moveRef.current.rect = null;
     setIsPanning(false);
     setDraggingNodeId(null);
     setConnectingPort(null);
@@ -145,8 +149,8 @@ export default function WhiteboardCard({
     const currentY = (e.clientY - rect.top - pan.y) / zoom;
 
     setDragOffset({
-      x: currentX - node.position.x,
-      y: currentY - node.position.y
+      x: currentX - node.x,
+      y: currentY - node.y
     });
   };
 
@@ -186,14 +190,24 @@ export default function WhiteboardCard({
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
     return {
-      x: isOutput ? node.position.x + 270 : node.position.x,
-      y: node.position.y + 42
+      x: isOutput ? node.x + NODE_WIDTH : node.x,
+      y: node.y + PORT_CENTER_Y
     };
   };
 
+  const previewAnchor = connectingPort
+    ? getNodePortPos(connectingPort.nodeId, connectingPort.isOutput)
+    : null;
+  const previewPath = previewAnchor
+    ? getWirePath(
+      connectingPort.isOutput ? previewAnchor : mousePos,
+      connectingPort.isOutput ? mousePos : previewAnchor
+    )
+    : null;
+
   return (
     <div className="w-full h-full relative overflow-hidden select-none flex-1">
-      {/* Whiteboard Canvas Surface (White Background with Dot Grid) */}
+      {/* Workflow canvas surface */}
       <div 
         ref={canvasRef}
         onMouseDown={handleMouseDown}
@@ -203,7 +217,12 @@ export default function WhiteboardCard({
         onWheel={handleWheel}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        className={`w-full h-full relative overflow-hidden canvas-bg canvas-grid-figma bg-white cursor-grab ${
+        style={{
+          '--canvas-grid-size': `${GRID_SIZE * zoom}px`,
+          '--canvas-grid-x': `${pan.x}px`,
+          '--canvas-grid-y': `${pan.y}px`
+        }}
+        className={`w-full h-full relative overflow-hidden canvas-bg canvas-grid-figma cursor-grab ${
           isPanning ? 'cursor-grabbing' : ''
         }`}
       >
@@ -220,19 +239,19 @@ export default function WhiteboardCard({
             {edges.map((edge) => {
               const srcPos = getNodePortPos(edge.source, true);
               const tgtPos = getNodePortPos(edge.target, false);
-              const deltaX = Math.abs(tgtPos.x - srcPos.x) * 0.5;
-              const pathD = `M ${srcPos.x} ${srcPos.y} C ${srcPos.x + deltaX} ${srcPos.y}, ${tgtPos.x - deltaX} ${tgtPos.y}, ${tgtPos.x} ${tgtPos.y}`;
+              const pathD = getWirePath(srcPos, tgtPos);
 
               const isEdgeActive = activeNodeId === edge.source || activeNodeId === edge.target;
 
               return (
-                <g key={edge.id}>
+                <g key={edge.id} data-edge-id={edge.id}>
                   <path
                     d={pathD}
                     fill="none"
-                    stroke="#E2E8F0"
-                    strokeWidth="4"
-                    strokeDasharray="6 6"
+                    stroke="rgba(255, 255, 255, 0.92)"
+                    strokeWidth="5"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
                   />
                   <path
                     d={pathD}
@@ -240,6 +259,8 @@ export default function WhiteboardCard({
                     stroke={isEdgeActive ? '#8B5CF6' : '#64748B'}
                     strokeWidth="2.5"
                     strokeDasharray="6 6"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
                     className={isEdgeActive ? 'wire-path-active' : 'wire-path-figma'}
                   />
                 </g>
@@ -249,11 +270,14 @@ export default function WhiteboardCard({
             {/* Connecting Wire Drag Preview */}
             {connectingPort && (
               <path
-                d={`M ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).x} ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).y} Q ${mousePos.x} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`}
+                d={previewPath}
                 fill="none"
-                stroke="#64748B"
-                strokeWidth="3"
+                stroke="#7C3AED"
+                strokeWidth="2.5"
                 strokeDasharray="6 6"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+                className="wire-preview"
               />
             )}
           </svg>
@@ -264,17 +288,19 @@ export default function WhiteboardCard({
             const IconComp = ICON_MAP[catObj.icon] || Zap;
             const isSelected = selectedNodeId === node.id;
             const isRunning = activeNodeId === node.id;
+            const isDragging = draggingNodeId === node.id;
 
             return (
               <div
                 key={node.id}
+                data-node-id={node.id}
                 onMouseDown={(e) => handleNodeMouseDown(e, node)}
-                style={{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: '270px' }}
+                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${NODE_WIDTH}px` }}
                 className={`figma-node-card ${
                   isRunning ? 'running' : ''
                 } ${node.status === 'success' ? 'success' : ''} ${
                   isSelected ? 'selected' : ''
-                } absolute z-10 p-4 font-sans text-left cursor-grab active:cursor-grabbing bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl transition-shadow hover:shadow-2xl text-zinc-100`}
+                } ${isDragging ? 'dragging' : ''} absolute z-10 p-4 font-sans text-left cursor-grab active:cursor-grabbing bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl transition-[border-color,box-shadow] duration-150 ease-out hover:shadow-2xl text-zinc-100`}
               >
                 {/* Subtle Left Input Connector Handle (Matching Black Theme) */}
                 <div
@@ -290,7 +316,7 @@ export default function WhiteboardCard({
                 <div
                   onMouseUp={(e) => handlePortMouseUp(e, node.id, 'out', true)}
                   onMouseDown={(e) => handlePortMouseDown(e, node.id, 'out', true)}
-                  className="group/port absolute -right-2 top-[38px] z-20 w-4 h-4 rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-500 flex items-center justify-center cursor-crosshair shadow-sm transition-transform hover:scale-125"
+                  className="group/port absolute -right-2 top-[34px] z-20 w-4 h-4 rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-500 flex items-center justify-center cursor-crosshair shadow-sm transition-transform hover:scale-125"
                   title="Output Port"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
