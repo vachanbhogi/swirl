@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Swirl — AI Visual Scratch Studio & macOS Control Center",
+        "title": "",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

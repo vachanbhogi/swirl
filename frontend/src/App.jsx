@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import Navbar from './components/Navbar';
 import WhiteboardCard from './components/WhiteboardCard';
 import CodeBlockPalette from './components/CodeBlockPalette';
-import NodeConfigModal from './components/NodeConfigModal';
+import NodePropertiesPanel from './components/NodePropertiesPanel';
 import JacCodeViewer from './components/JacCodeViewer';
-import PromptBar from './components/PromptBar';
+import AIScreen from './components/AIScreen';
 import ExecutionInspector from './components/ExecutionInspector';
 import { INITIAL_NODES, INITIAL_EDGES } from './data/blockDefinitions';
 import { normalizeWorkflow } from './data/workflowNormalization';
@@ -23,12 +23,13 @@ export default function App() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [editingNode, setEditingNode] = useState(null);
   const [showCodeView, setShowCodeView] = useState(false);
   const [isCompilingPrompt, setIsCompilingPrompt] = useState(false);
   const [logs, setLogs] = useState([]);
   const [executionResults, setExecutionResults] = useState({});
   const [generatedCode, setGeneratedCode] = useState(null);
+  const [activeTab, setActiveTab] = useState('workflow'); // 'workflow' | 'ai'
+  const [showLogsInspector, setShowLogsInspector] = useState(false);
 
   useEffect(() => {
     let unlisten;
@@ -54,15 +55,15 @@ export default function App() {
     return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // Add block to canvas
   const handleDropNewBlock = (blockDef, x, y) => {
     const newNode = {
       id: `node-${Date.now()}`,
       type: blockDef.type,
       title: blockDef.title,
       category: blockDef.category,
-      x: x || 150,
-      y: y || 150,
+      jacNode: blockDef.jacNode || 'WorkflowBlock',
+      x: x || 250,
+      y: y || 180,
       config: { ...blockDef.config },
       status: 'idle'
     };
@@ -74,7 +75,25 @@ export default function App() {
     setNodes((prev) =>
       prev.map((n) => (n.id === nodeId ? { ...n, title: newTitle, config: newConfig } : n))
     );
-    setEditingNode(null);
+  };
+
+  const handleDuplicateNode = (node) => {
+    const newNode = {
+      ...node,
+      id: `node-${Date.now()}`,
+      x: node.x + 40,
+      y: node.y + 40,
+      status: 'idle'
+    };
+    setNodes((prev) => [...prev, newNode]);
+    setSelectedNodeId(newNode.id);
+  };
+
+  const handleDeleteNode = (nodeId) => {
+    if (nodes.find((node) => node.id === nodeId)?.category === 'source') return;
+    setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+    setEdges((prev) => prev.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
   };
 
   const handleRunWorkflow = async () => {
@@ -113,6 +132,7 @@ export default function App() {
       setNodes(workflow.nodes);
       setEdges(workflow.edges);
       setSelectedNodeId(null);
+      setActiveTab('workflow');
       setLogs((prev) => [...prev, {
         time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${workflow.nodes.length} blocks from Jac LLM.`
       }]);
@@ -128,12 +148,12 @@ export default function App() {
   const handleCodeView = async (nextValue) => {
     setShowCodeView(nextValue);
     if (nextValue && isTauriEnvironment()) {
-        try {
-          const workflow = normalizeWorkflow(nodes, edges);
-          setNodes(workflow.nodes);
-          setEdges(workflow.edges);
-          setGeneratedCode(await generateJacSource(workflow));
-        } catch (error) {
+      try {
+        const workflow = normalizeWorkflow(nodes, edges);
+        setNodes(workflow.nodes);
+        setEdges(workflow.edges);
+        setGeneratedCode(await generateJacSource(workflow));
+      } catch (error) {
         setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), type: 'error', prefix: 'code', message: error.message }]);
       }
     }
@@ -141,66 +161,90 @@ export default function App() {
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
 
-  const handleClearCanvas = () => {
-    setNodes(initialWorkflow.nodes);
-    setEdges(initialWorkflow.edges);
-    setSelectedNodeId(null);
-    setActiveNodeId(null);
-  };
+  const isWorkflowView = activeTab === 'workflow';
 
   return (
-    <div className="h-screen w-screen bg-black text-neutral-100 relative overflow-hidden font-sans">
-      {/* Floating Navbar */}
+    <div className="h-screen w-screen flex flex-col relative overflow-hidden font-sans bg-black text-zinc-100 dark dark-theme">
+      {/* Top Navbar — visible on both screens for tab switching */}
       <Navbar 
-        isExecuting={isExecuting}
-        showCodeView={showCodeView}
-        setShowCodeView={handleCodeView}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         onRunWorkflow={handleRunWorkflow}
-        onClearCanvas={handleClearCanvas}
+        isExecuting={isExecuting}
+        showLogsInspector={showLogsInspector}
+        onToggleLogs={() => setShowLogsInspector((prev) => !prev)}
+        logsCount={logs.length}
       />
 
-      {/* Main Workspace: Whiteboard Grid Canvas + Right Code Block Palette */}
-      <main className="h-full w-full relative">
-        <div className="fixed left-6 right-80 top-20 z-30">
-          <PromptBar onGenerateFromPrompt={handleGenerateFromPrompt} isCompilingPrompt={isCompilingPrompt} />
-        </div>
-        <WhiteboardCard 
-          nodes={nodes}
-          setNodes={setNodes}
-          edges={edges}
-          setEdges={setEdges}
-          activeNodeId={activeNodeId}
-          selectedNodeId={selectedNodeId}
-          setSelectedNodeId={setSelectedNodeId}
-          onOpenConfigModal={(node) => setEditingNode(node)}
-          onDropNewBlock={handleDropNewBlock}
-        />
-        <CodeBlockPalette onAddBlock={(block) => handleDropNewBlock(block, 200, 200)} />
+      {/* Main Workspace Layout */}
+      {isWorkflowView ? (
+        /* Visual Workflow Canvas Screen */
+        <div className="flex-1 flex w-full h-full overflow-hidden p-3 gap-3 bg-black">
+          {/* Center Canvas Area */}
+          <main className="flex-1 h-full relative flex flex-col rounded-2xl overflow-hidden border border-zinc-800 bg-black shadow-xl">
+            <WhiteboardCard 
+              nodes={nodes}
+              setNodes={setNodes}
+              edges={edges}
+              setEdges={setEdges}
+              activeNodeId={activeNodeId}
+              selectedNodeId={selectedNodeId}
+              setSelectedNodeId={setSelectedNodeId}
+              onDropNewBlock={handleDropNewBlock}
+              isDarkMode={false}
+              showLogsInspector={showLogsInspector}
+              onToggleLogs={() => setShowLogsInspector((prev) => !prev)}
+              logsCount={logs.length}
+            />
+          </main>
 
-        {/* Jac Code Viewer Drawer */}
-        {showCodeView && (
-          <div className="fixed left-6 bottom-6 z-50 w-96 max-h-[60vh] rounded-3xl bg-neutral-950 border border-neutral-800 shadow-2xl p-4 overflow-y-auto">
-            <JacCodeViewer nodes={nodes} edges={edges} jacCode={generatedCode} onClose={() => handleCodeView(false)} />
+          {/* Right Side: Building Blocks Palette / Node Inspector Panel */}
+          <div className="h-full rounded-2xl overflow-hidden border border-zinc-800 shadow-sm shrink-0 bg-zinc-950">
+            {selectedNode ? (
+              <NodePropertiesPanel 
+                selectedNode={selectedNode}
+                onSaveNodeConfig={handleSaveNodeConfig}
+                onDeleteNode={handleDeleteNode}
+                onDuplicateNode={handleDuplicateNode}
+                onClose={() => setSelectedNodeId(null)}
+                totalNodes={nodes.length}
+                totalEdges={edges.length}
+                onRunWorkflow={handleRunWorkflow}
+              />
+            ) : (
+              <CodeBlockPalette onAddBlock={(block) => handleDropNewBlock(block, 260, 200)} />
+            )}
           </div>
-        )}
-
-        {/* Node Parameter Edit Modal */}
-        {editingNode && (
-          <NodeConfigModal 
-            node={editingNode}
-            onSave={handleSaveNodeConfig}
-            onClose={() => setEditingNode(null)}
-          />
-        )}
-        <div className="fixed left-6 right-80 bottom-0 z-30">
-          <ExecutionInspector
-            logs={logs}
-            activeNode={selectedNode || nodes.find((node) => node.id === activeNodeId)}
-            executionResults={executionResults}
-            onClearLogs={() => { setLogs([]); setExecutionResults({}); }}
-          />
         </div>
-      </main>
+      ) : (
+        /* Full Standalone AI Screen — no workflow chrome */
+        <AIScreen 
+          onGenerateFromPrompt={handleGenerateFromPrompt}
+          isCompilingPrompt={isCompilingPrompt}
+        />
+      )}
+
+      {/* Jac Code Drawer — workflow only */}
+      {isWorkflowView && showCodeView && (
+        <JacCodeViewer 
+          nodes={nodes} 
+          edges={edges} 
+          jacCode={generatedCode} 
+          onClose={() => handleCodeView(false)} 
+        />
+      )}
+
+      {/* Floating Activity Inspector Overlay — workflow only */}
+      {isWorkflowView && (
+        <ExecutionInspector
+          isOpen={showLogsInspector}
+          onClose={() => setShowLogsInspector(false)}
+          logs={logs}
+          activeNode={selectedNode || nodes.find((node) => node.id === activeNodeId)}
+          executionResults={executionResults}
+          onClearLogs={() => { setLogs([]); setExecutionResults({}); }}
+        />
+      )}
     </div>
   );
 }

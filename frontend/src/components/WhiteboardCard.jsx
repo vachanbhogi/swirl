@@ -3,7 +3,6 @@ import {
   ZoomIn, 
   ZoomOut, 
   Maximize2, 
-  Compass, 
   Settings, 
   Trash2, 
   CheckCircle2, 
@@ -13,8 +12,8 @@ import {
   Command,
   Plug,
   GitBranch,
-  Send
-  ,Radio
+  Send,
+  Radio
 } from 'lucide-react';
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
 
@@ -28,7 +27,6 @@ export default function WhiteboardCard({
   activeNodeId,
   selectedNodeId,
   setSelectedNodeId,
-  onOpenConfigModal,
   onDropNewBlock
 }) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -42,7 +40,7 @@ export default function WhiteboardCard({
   const panRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
   const canvasRef = useRef(null);
 
-  // Mouse move handler for panning, node movement, and wire preview
+  // Mouse move handler for canvas panning, node dragging, and wire previews
   const handleMouseMove = (e) => {
     if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
@@ -70,8 +68,12 @@ export default function WhiteboardCard({
   };
 
   const handleMouseDown = (e) => {
-    // Only pan if background is clicked
-    if (e.target === canvasRef.current || e.target.tagName === 'svg' || e.target.classList.contains('canvas-bg')) {
+    if (
+      e.target === canvasRef.current ||
+      e.target.tagName === 'svg' ||
+      e.target.classList.contains('canvas-bg') ||
+      e.target.classList.contains('canvas-grid-figma')
+    ) {
       setIsPanning(true);
       panRef.current = {
         startX: e.clientX,
@@ -91,7 +93,7 @@ export default function WhiteboardCard({
   const handleWheel = (e) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.05 : 0.95;
-    setZoom((prevZoom) => Math.min(Math.max(prevZoom * zoomFactor, 0.4), 2.5));
+    setZoom((prevZoom) => Math.min(Math.max(prevZoom * zoomFactor, 0.4), 2.2));
   };
 
   const resetCamera = () => {
@@ -99,7 +101,6 @@ export default function WhiteboardCard({
     setZoom(1);
   };
 
-  // Drag over & Drop new block from tool library
   const handleDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -113,7 +114,7 @@ export default function WhiteboardCard({
     try {
       const blockDef = JSON.parse(rawData);
       const rect = canvasRef.current.getBoundingClientRect();
-      const dropX = (e.clientX - rect.left - pan.x) / zoom - 120;
+      const dropX = (e.clientX - rect.left - pan.x) / zoom - 135;
       const dropY = (e.clientY - rect.top - pan.y) / zoom - 40;
 
       onDropNewBlock(blockDef, Math.max(20, dropX), Math.max(20, dropY));
@@ -137,7 +138,6 @@ export default function WhiteboardCard({
     });
   };
 
-  // Port Connection Handlers
   const handlePortMouseDown = (e, nodeId, portName, isOutput) => {
     e.stopPropagation();
     setConnectingPort({ nodeId, portName, isOutput });
@@ -174,198 +174,208 @@ export default function WhiteboardCard({
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
     return {
-      x: isOutput ? node.x + 260 : node.x,
-      y: node.y + 40
+      x: isOutput ? node.x + 270 : node.x,
+      y: node.y + 42
     };
   };
 
   return (
-    <div className="absolute inset-0 pt-20 pl-6 pr-80 pb-6 pointer-events-auto select-none flex flex-col">
-      <div className="w-full h-full rounded-3xl bg-white border border-neutral-300 shadow-2xl flex flex-col overflow-hidden relative">
-        {/* Header / Canvas Control Bar */}
-        <div className="h-11 px-6 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between z-20">
-          <div className="flex items-center gap-2 text-neutral-600">
-            <Compass className="w-4 h-4 text-neutral-500" />
-            <span className="text-xs font-mono font-medium text-neutral-700">Whiteboard Canvas</span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-200 text-neutral-600">
-              {Math.round(zoom * 100)}%
-            </span>
-            <span className="text-[11px] text-neutral-400 font-mono hidden sm:inline ml-2">
-              Nodes: {nodes.length} | Edges: {edges.length}
-            </span>
-          </div>
-
-          {/* Camera Controls */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setZoom((z) => Math.min(z + 0.15, 2.5))}
-              className="p-1.5 rounded-lg text-neutral-600 hover:bg-neutral-200 transition"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setZoom((z) => Math.max(z - 0.15, 0.4))}
-              className="p-1.5 rounded-lg text-neutral-600 hover:bg-neutral-200 transition"
-              title="Zoom Out"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={resetCamera}
-              className="p-1.5 rounded-lg text-neutral-600 hover:bg-neutral-200 transition"
-              title="Reset Camera View"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Interactive Infinite Canvas Container */}
+    <div className="w-full h-full relative overflow-hidden select-none flex-1">
+      {/* Whiteboard Canvas Surface (White Background with Dot Grid) */}
+      <div 
+        ref={canvasRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        className={`w-full h-full relative overflow-hidden canvas-bg canvas-grid-figma bg-white cursor-grab ${
+          isPanning ? 'cursor-grabbing' : ''
+        }`}
+      >
+        {/* Pannable & Zoomable Viewport */}
         <div 
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          className={`flex-1 relative overflow-hidden bg-white canvas-bg cursor-grab ${
-            isPanning ? 'cursor-grabbing' : ''
-          }`}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: '0 0'
+          }}
+          className="absolute inset-0 w-full h-full pointer-events-auto"
         >
-          {/* Zoomable & Pannable Viewport */}
-          <div 
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: '0 0'
-            }}
-            className="absolute inset-0 w-full h-full pointer-events-auto"
-          >
-            {/* SVG Wire Edges Layer */}
-            <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-none z-0">
-              {edges.map((edge) => {
-                const srcPos = getNodePortPos(edge.source, true);
-                const tgtPos = getNodePortPos(edge.target, false);
-                const deltaX = Math.abs(tgtPos.x - srcPos.x) * 0.5;
-                const pathD = `M ${srcPos.x} ${srcPos.y} C ${srcPos.x + deltaX} ${srcPos.y}, ${tgtPos.x - deltaX} ${tgtPos.y}, ${tgtPos.x} ${tgtPos.y}`;
+          {/* SVG Dotted Connection Wires Layer */}
+          <svg className="absolute inset-0 w-[6000px] h-[6000px] pointer-events-none z-0">
+            {edges.map((edge) => {
+              const srcPos = getNodePortPos(edge.source, true);
+              const tgtPos = getNodePortPos(edge.target, false);
+              const deltaX = Math.abs(tgtPos.x - srcPos.x) * 0.5;
+              const pathD = `M ${srcPos.x} ${srcPos.y} C ${srcPos.x + deltaX} ${srcPos.y}, ${tgtPos.x - deltaX} ${tgtPos.y}, ${tgtPos.x} ${tgtPos.y}`;
 
-                return (
-                  <path
-                    key={edge.id}
-                    d={pathD}
-                    fill="none"
-                    stroke="#404040"
-                    strokeWidth="2.5"
-                    strokeDasharray="4"
-                  />
-                );
-              })}
-
-              {/* Connecting Wire Drag Preview */}
-              {connectingPort && (
-                <path
-                  d={`M ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).x} ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).y} Q ${mousePos.x} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`}
-                  fill="none"
-                  stroke="#171717"
-                  strokeWidth="2.5"
-                  strokeDasharray="4"
-                />
-              )}
-            </svg>
-
-            {/* Interactive Block Nodes Layer */}
-            {nodes.map((node) => {
-              const catObj = BLOCK_CATEGORIES.find((c) => c.id === node.category) || BLOCK_CATEGORIES[0];
-              const IconComp = ICON_MAP[catObj.icon] || Zap;
-              const isSelected = selectedNodeId === node.id;
-              const isRunning = activeNodeId === node.id;
+              const isEdgeActive = activeNodeId === edge.source || activeNodeId === edge.target;
 
               return (
+                <g key={edge.id}>
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="#E2E8F0"
+                    strokeWidth="4"
+                    strokeDasharray="6 6"
+                  />
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke={isEdgeActive ? '#8B5CF6' : '#64748B'}
+                    strokeWidth="2.5"
+                    strokeDasharray="6 6"
+                    className={isEdgeActive ? 'wire-path-active' : 'wire-path-figma'}
+                  />
+                </g>
+              );
+            })}
+
+            {/* Connecting Wire Drag Preview */}
+            {connectingPort && (
+              <path
+                d={`M ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).x} ${getNodePortPos(connectingPort.nodeId, connectingPort.isOutput).y} Q ${mousePos.x} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`}
+                fill="none"
+                stroke="#64748B"
+                strokeWidth="3"
+                strokeDasharray="6 6"
+              />
+            )}
+          </svg>
+
+          {/* Interactive Black Block Cards with Subtle Matching Black Port Connectors */}
+          {nodes.map((node) => {
+            const catObj = BLOCK_CATEGORIES.find((c) => c.id === node.category) || BLOCK_CATEGORIES[0];
+            const IconComp = ICON_MAP[catObj.icon] || Zap;
+            const isSelected = selectedNodeId === node.id;
+            const isRunning = activeNodeId === node.id;
+
+            return (
+              <div
+                key={node.id}
+                onMouseDown={(e) => handleNodeMouseDown(e, node)}
+                style={{ left: `${node.x}px`, top: `${node.y}px`, width: '270px' }}
+                className={`figma-node-card ${
+                  isRunning ? 'running' : ''
+                } ${node.status === 'success' ? 'success' : ''} ${
+                  isSelected ? 'selected' : ''
+                } absolute z-10 p-4 font-sans text-left cursor-grab active:cursor-grabbing bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl transition-all hover:shadow-2xl text-zinc-100`}
+              >
+                {/* Subtle Left Input Connector Handle (Matching Black Theme) */}
                 <div
-                  key={node.id}
-                  onMouseDown={(e) => handleNodeMouseDown(e, node)}
-                  style={{ left: `${node.x}px`, top: `${node.y}px`, width: '270px' }}
-                  className={`scratch-block block-cat-${node.category} ${
-                    isRunning ? 'node-running' : ''
-                  } ${node.status === 'success' ? 'node-success' : ''} ${
-                    isSelected ? 'selected' : ''
-                  } ${node.category === 'source' ? 'source-block' : ''}
-                  } absolute z-10 p-3.5 rounded-xl border relative shadow-xl transition-transform hover:-translate-y-0.5`}
+                  onMouseUp={(e) => handlePortMouseUp(e, node.id, 'in', false)}
+                  onMouseDown={(e) => handlePortMouseDown(e, node.id, 'in', false)}
+                  className="group/port absolute -left-2 top-[34px] z-20 w-4 h-4 rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-500 flex items-center justify-center cursor-crosshair shadow-sm transition-transform hover:scale-125"
+                  title="Input Port"
                 >
-                  {/* Left Connection Port */}
-                  <div
-                    onMouseUp={(e) => handlePortMouseUp(e, node.id, 'in', false)}
-                    onMouseDown={(e) => handlePortMouseDown(e, node.id, 'in', false)}
-                    className="block-port absolute -left-2 top-[34px] z-20 shadow-md"
-                    title="Input Port"
-                  />
+                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                </div>
 
-                  {/* Right Connection Port */}
-                  <div
-                    onMouseUp={(e) => handlePortMouseUp(e, node.id, 'out', true)}
-                    onMouseDown={(e) => handlePortMouseDown(e, node.id, 'out', true)}
-                    className="block-port absolute -right-2 top-[34px] z-20 shadow-md"
-                    title="Output Port"
-                  />
+                {/* Subtle Right Output Connector Handle (Matching Black Theme) */}
+                <div
+                  onMouseUp={(e) => handlePortMouseUp(e, node.id, 'out', true)}
+                  onMouseDown={(e) => handlePortMouseDown(e, node.id, 'out', true)}
+                  className="group/port absolute -right-2 top-[38px] z-20 w-4 h-4 rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 hover:border-zinc-500 flex items-center justify-center cursor-crosshair shadow-sm transition-transform hover:scale-125"
+                  title="Output Port"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                </div>
 
-                  {/* Node Header */}
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm"
-                        style={{ backgroundColor: catObj.color }}
-                      >
-                        <IconComp className="w-4 h-4" />
-                      </div>
-                      <div className="overflow-hidden">
-                      <h4 className="text-xs font-bold text-slate-100 truncate">{node.title}</h4>
-                      <p className="text-[10px] text-slate-400 font-mono truncate">
-                          {node.category === 'source' ? 'ENTRYPOINT • TRIGGER ROUTER' : `${node.category.toUpperCase()} • ${node.type}`}
-                        </p>
-                      </div>
+                {/* Block Header */}
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/80">
+                  <div className="flex items-center gap-2.5 overflow-hidden">
+                    <div
+                      className="w-8 h-8 rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm"
+                      style={{ backgroundColor: catObj.color }}
+                    >
+                      <IconComp className="w-4.5 h-4.5" />
                     </div>
+                    <div className="overflow-hidden">
+                      <h4 className="text-xs font-bold text-white truncate font-sans">
+                        {node.title}
+                      </h4>
+                      <p className="text-[10px] text-zinc-400 font-sans truncate">
+                        {node.category === 'source' ? 'ENTRYPOINT TRIGGER' : `${catObj.name}`}
+                      </p>
+                    </div>
+                  </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isRunning && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
-                      {node.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                      {node.category !== 'source' && <button
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isRunning && <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />}
+                    {node.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    
+                    {node.category !== 'source' && (
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onOpenConfigModal(node);
+                          setSelectedNodeId(node.id);
                         }}
-                        className="p-1 rounded bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition"
-                        title="Edit Parameters"
+                        className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+                        title="Configure Block"
                       >
                         <Settings className="w-3.5 h-3.5" />
-                      </button>}
+                      </button>
+                    )}
+
+                    {node.category !== 'source' && (
                       <button
                         onClick={(e) => handleDeleteNode(e, node.id)}
-                        className="p-1 rounded bg-white/10 hover:bg-rose-500/30 text-slate-400 hover:text-rose-300 transition"
-                        title="Delete Node"
+                        className="p-1 rounded-lg hover:bg-rose-950/60 text-zinc-400 hover:text-rose-400 transition"
+                        title="Delete Block"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </div>
-                  </div>
-
-                  {/* Node Config Summary */}
-                  <div className="bg-slate-950/70 rounded-lg p-2 text-[10px] font-mono text-slate-300 space-y-1 border border-white/10">
-                    {Object.entries(node.config || {}).slice(0, 2).map(([k, v]) => (
-                      <div key={k} className="flex justify-between items-center text-[10px]">
-                        <span className="text-slate-400">{k}:</span>
-                        <span className="text-amber-300 font-semibold truncate max-w-[110px]">
-                          {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                        </span>
-                      </div>
-                    ))}
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Config Preview Box */}
+                <div className="bg-zinc-900/90 rounded-xl p-2.5 text-[11px] text-zinc-300 space-y-1 border border-zinc-800/80">
+                  {Object.entries(node.config || {}).slice(0, 2).map(([k, v]) => (
+                    <div key={k} className="flex justify-between items-center text-[10px]">
+                      <span className="text-zinc-400 capitalize">{k}:</span>
+                      <span className="font-semibold text-zinc-200 truncate max-w-[120px]">
+                        {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
+
+      {/* Bottom-Right Camera Controls */}
+      <div className="absolute bottom-6 right-6 z-20 flex items-center gap-1.5 bg-zinc-900/95 text-zinc-200 backdrop-blur-xl p-1.5 rounded-2xl border border-zinc-800 shadow-xl select-none">
+        <button
+          onClick={() => setZoom((z) => Math.min(z + 0.15, 2.2))}
+          className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+          title="Zoom In"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+        <span className="text-xs font-mono font-bold text-zinc-200 px-2 min-w-[48px] text-center">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          onClick={() => setZoom((z) => Math.max(z - 0.15, 0.4))}
+          className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+        <div className="h-4 w-px bg-zinc-800 mx-1" />
+        <button
+          onClick={resetCamera}
+          className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+          title="Reset Zoom to 100%"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );

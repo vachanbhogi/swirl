@@ -2,15 +2,6 @@ import React, { useState } from 'react';
 import { Plus, Zap, Play, Sparkles, Command, Plug, GitBranch, Send, ArrowRight } from 'lucide-react';
 import { BLOCK_LIBRARY } from '../data/blockDefinitions';
 
-const CATEGORY_ICON_MAP = {
-  Zap,
-  Sparkles,
-  Command,
-  Plug,
-  GitBranch,
-  Send
-};
-
 export default function CodeBlockPalette({ onAddBlock }) {
   const [activeTab, setActiveTab] = useState('triggers'); // 'triggers' | 'actions'
 
@@ -27,33 +18,33 @@ export default function CodeBlockPalette({ onAddBlock }) {
   });
 
   return (
-    <aside className="fixed right-6 top-20 bottom-6 z-40 w-80 rounded-3xl bg-neutral-950 border border-neutral-800 shadow-2xl p-5 flex flex-col justify-between">
+    <aside className="w-80 h-full bg-zinc-950 border-r border-zinc-800 p-5 flex flex-col justify-between select-none shrink-0">
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header */}
-        <div className="pb-3 border-b border-neutral-800 shrink-0">
+        <div className="pb-3 border-b border-zinc-800 shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xs uppercase tracking-wider font-semibold text-neutral-200 font-sans">
+              <h3 className="text-xs uppercase tracking-wider font-semibold text-zinc-200 font-sans">
                 Building Blocks
               </h3>
-              <p className="text-[11px] text-neutral-400 mt-0.5 font-sans">Drag onto canvas to build workflow</p>
+              <p className="text-[11px] text-zinc-400 mt-0.5 font-sans">Drag onto canvas to build workflow</p>
             </div>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           </div>
 
-          {/* User-friendly Tabs: Triggers vs Actions */}
-          <div className="grid grid-cols-2 gap-1.5 p-1 mt-3.5 bg-neutral-900 border border-neutral-800 rounded-xl">
+          {/* Triggers vs Actions Segmented Selector */}
+          <div className="grid grid-cols-2 gap-1.5 p-1 mt-3.5 bg-zinc-900 border border-zinc-800 rounded-xl">
             <button
               onClick={() => setActiveTab('triggers')}
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition font-sans ${
                 activeTab === 'triggers'
-                  ? 'bg-neutral-800 text-purple-300 border border-neutral-700 shadow-sm'
-                  : 'text-neutral-400 hover:text-neutral-200'
+                  ? 'bg-zinc-800 text-purple-300 border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <Zap className="w-3.5 h-3.5 text-purple-400" />
               <span>Triggers</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-950 text-neutral-400 font-mono">
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-950 text-zinc-400 font-mono">
                 {BLOCK_LIBRARY.filter((b) => b.category === 'trigger').length}
               </span>
             </button>
@@ -62,22 +53,22 @@ export default function CodeBlockPalette({ onAddBlock }) {
               onClick={() => setActiveTab('actions')}
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition font-sans ${
                 activeTab === 'actions'
-                  ? 'bg-neutral-800 text-amber-300 border border-neutral-700 shadow-sm'
-                  : 'text-neutral-400 hover:text-neutral-200'
+                  ? 'bg-zinc-800 text-amber-300 border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <Play className="w-3.5 h-3.5 text-amber-400" />
               <span>Actions</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-950 text-neutral-400 font-mono">
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-950 text-zinc-400 font-mono">
                 {BLOCK_LIBRARY.filter((b) => b.category !== 'trigger' && b.category !== 'source').length}
               </span>
             </button>
           </div>
         </div>
 
-        {/* Tab Subtitle & Explanation */}
+        {/* Tab Description */}
         <div className="py-2.5 px-1 shrink-0">
-          <p className="text-[11px] text-neutral-400 font-sans">
+          <p className="text-[11px] text-zinc-400 font-sans">
             {activeTab === 'triggers'
               ? '⚡ What starts your automation:'
               : '🚀 What your agent will execute:'}
@@ -99,7 +90,7 @@ export default function CodeBlockPalette({ onAddBlock }) {
                 key={block.type}
                 draggable
                 onDragStart={(e) => handleDragStart(e, block)}
-                className="group p-3 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition cursor-grab active:cursor-grabbing flex items-center justify-between shadow-sm"
+                className="group p-3 rounded-2xl bg-zinc-900 border border-zinc-800/80 hover:border-zinc-700 transition cursor-grab active:cursor-grabbing flex items-center justify-between shadow-sm"
               >
                 <div className="flex items-center gap-3 overflow-hidden">
                   <div className={`p-2 rounded-xl border shrink-0 ${
@@ -113,10 +104,10 @@ export default function CodeBlockPalette({ onAddBlock }) {
                     <IconComp className="w-4 h-4" />
                   </div>
                   <div className="overflow-hidden">
-                    <h4 className="text-xs font-semibold text-neutral-100 group-hover:text-white transition truncate font-sans">
+                    <h4 className="text-xs font-semibold text-zinc-100 group-hover:text-white transition truncate font-sans">
                       {block.title}
                     </h4>
-                    <p className="text-[10px] text-neutral-400 line-clamp-1 font-sans">
+                    <p className="text-[10px] text-zinc-400 line-clamp-1 font-sans">
                       {block.description}
                     </p>
                   </div>
@@ -124,7 +115,7 @@ export default function CodeBlockPalette({ onAddBlock }) {
 
                 <button 
                   onClick={() => onAddBlock && onAddBlock(block)}
-                  className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800 transition shrink-0 ml-2"
+                  className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition shrink-0 ml-2"
                   title="Add Block to Canvas"
                 >
                   <Plus className="w-4 h-4" />
@@ -134,12 +125,12 @@ export default function CodeBlockPalette({ onAddBlock }) {
           })}
         </div>
 
-        {/* Footer Instructions */}
-        <div className="pt-3 border-t border-neutral-800 shrink-0">
-          <div className="p-2.5 rounded-2xl bg-neutral-900/60 border border-neutral-800 flex items-center gap-2 text-neutral-400">
-            <ArrowRight className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
-            <p className="text-[11px] text-neutral-400 leading-snug font-sans">
-              Drag any block onto the canvas, then connect the dots to link steps!
+        {/* Footer Guidance */}
+        <div className="pt-3 border-t border-zinc-800 shrink-0">
+          <div className="p-2.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 flex items-center gap-2 text-zinc-400">
+            <ArrowRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <p className="text-[11px] text-zinc-400 leading-snug font-sans">
+              Drag any block onto the canvas to connect steps!
             </p>
           </div>
         </div>

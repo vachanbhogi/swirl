@@ -67,10 +67,9 @@ body {
   background-size: 24px 24px;
 }
 
-.canvas-grid-light {
-  background-color: #ffffff;
-  background-image: radial-gradient(#e5e5e5 1.5px, transparent 1.5px);
-  background-size: 24px 24px;
+.canvas-grid-figma {
+  background-color: #FFFFFF;
+  background-image: none;
 }
 
 /* Scratch Block Styling */

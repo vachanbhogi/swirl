@@ -1,72 +1,75 @@
 import React from 'react';
-import { Play, Code, RotateCcw, Zap } from 'lucide-react';
+import { Play, Layers, Sparkles, Terminal } from 'lucide-react';
 
 export default function Navbar({
+  activeTab = 'workflow',
+  setActiveTab,
   onRunWorkflow,
   isExecuting,
-  onClearCanvas,
-  showCodeView,
-  setShowCodeView
+  showLogsInspector,
+  onToggleLogs,
+  logsCount = 0
 }) {
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-4xl">
-      <nav className="rounded-full px-6 py-1.5 border border-neutral-800 bg-neutral-950/90 backdrop-blur-md flex items-center justify-between shadow-xl">
-        {/* Brand */}
-        <div className="flex items-center gap-2">
-          <Zap className="w-3.5 h-3.5 text-white" />
-          <span className="font-display text-sm font-bold text-white tracking-tight">Swirl</span>
-        </div>
+    <header className="h-14 w-full bg-[#0A0D14]/95 border-b border-zinc-800/80 px-6 flex items-center justify-between z-40 select-none shrink-0 font-sans">
+      {/* Left: Empty Space */}
+      <div className="w-16" />
 
-        {/* Essential Action Controls */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onRunWorkflow}
-            disabled={isExecuting}
-            className="flex items-center gap-1.5 px-4 py-1 rounded-full bg-white text-black text-xs font-semibold hover:bg-neutral-200 transition"
-          >
-            <Play className="w-3 h-3 fill-current" />
-            <span>{isExecuting ? 'Running...' : 'Run'}</span>
-          </button>
+      {/* Center: Minimal Segmented Tabs */}
+      <div className="flex items-center gap-1 p-1 bg-zinc-900/90 rounded-2xl border border-zinc-800">
+        <button
+          onClick={() => setActiveTab && setActiveTab('workflow')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition font-sans ${
+            activeTab === 'workflow'
+              ? 'bg-zinc-800 text-white shadow-sm border border-zinc-700'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Workflow</span>
+        </button>
 
-          <button
-            onClick={() => setShowCodeView && setShowCodeView(!showCodeView)}
-            className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-medium border transition ${
-              showCodeView
-                ? 'bg-neutral-800 text-white border-neutral-700'
-                : 'text-neutral-400 border-neutral-800 hover:text-white hover:border-neutral-700'
-            }`}
-          >
-            <Code className="w-3 h-3" />
-            <span>Code</span>
-          </button>
+        <button
+          onClick={() => setActiveTab && setActiveTab('ai')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold transition font-sans ${
+            activeTab === 'ai'
+              ? 'bg-zinc-800 text-white shadow-sm border border-zinc-700'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>AI Builder</span>
+        </button>
+      </div>
 
-          <button
-            onClick={async () => {
-              try {
-                const { invoke } = await import('@tauri-apps/api/core');
-                await invoke('toggle_notch');
-              } catch (e) {
-                console.log('Toggle notch error:', e);
-              }
-            }}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition"
-            title="Toggle Notch (Ctrl + Opt + Cmd + Space)"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Notch</span>
-          </button>
+      {/* Right: Actions */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggleLogs}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono font-semibold border transition ${
+            showLogsInspector
+              ? 'bg-purple-950/80 text-purple-300 border-purple-700 shadow-sm'
+              : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white hover:border-zinc-700'
+          }`}
+          title="Toggle Walker Logs Inspector"
+        >
+          <Terminal className="w-3.5 h-3.5 text-purple-400" />
+          <span>Logs ({logsCount})</span>
+        </button>
 
-          {onClearCanvas && (
-            <button
-              onClick={onClearCanvas}
-              className="p-1.5 rounded-full text-neutral-400 border border-neutral-800 hover:text-white hover:border-neutral-700 transition"
-              title="Clear"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-      </nav>
-    </div>
+        <button
+          onClick={onRunWorkflow}
+          disabled={isExecuting}
+          className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-xs font-bold transition font-sans ${
+            isExecuting
+              ? 'bg-zinc-800 text-zinc-500 cursor-wait'
+              : 'bg-white text-zinc-900 hover:bg-zinc-200 shadow-sm active:scale-95'
+          }`}
+        >
+          <Play className={`w-3.5 h-3.5 fill-current ${isExecuting ? 'animate-spin' : ''}`} />
+          <span>{isExecuting ? 'Executing...' : 'Run Workflow'}</span>
+        </button>
+      </div>
+    </header>
   );
 }

@@ -479,7 +479,7 @@ export function generateJacCode(nodes, edges) {
   }
 
   let code = `# =========================================================
-# Swirl AI Visual Scratch Editor — Generated Jaclang Source
+# Swirl — Generated Jaclang Source
 # Project: Swirl (JacHacks SF 2026)
 # Compiler target: Jaclang v0.7.8
 # Nodes: ${nodes.length} | Connections: ${edges.length}
