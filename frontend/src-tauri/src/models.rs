@@ -46,6 +46,16 @@ impl WorkflowDocument {
         }
 
         let mut ids = HashSet::new();
+        let source_count = self
+            .nodes
+            .iter()
+            .filter(|node| node.category == "source")
+            .count();
+        if source_count != 1 {
+            return Err(format!(
+                "Workflow must contain exactly one source node (found {source_count})"
+            ));
+        }
         for node in &self.nodes {
             if node.id.trim().is_empty() {
                 return Err("Workflow node IDs cannot be empty".into());
@@ -55,6 +65,12 @@ impl WorkflowDocument {
             }
             if node.title.len() > 200 {
                 return Err(format!("Node title is too long: {}", node.id));
+            }
+            if node.category == "trigger" {
+                return Err(format!(
+                    "Legacy trigger node must be migrated to Source: {}",
+                    node.id
+                ));
             }
         }
 
@@ -73,6 +89,13 @@ impl WorkflowDocument {
             }
             if edge.source == edge.target {
                 return Err(format!("Self-referencing edge is not allowed: {}", edge.id));
+            }
+            if self
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.target && node.category == "source")
+            {
+                return Err("Source node cannot have incoming edges".into());
             }
             *indegree
                 .get_mut(edge.target.as_str())
@@ -116,9 +139,9 @@ mod tests {
     fn node(id: &str) -> WorkflowNode {
         WorkflowNode {
             id: id.into(),
-            block_type: "trigger".into(),
+            block_type: "source".into(),
             title: id.into(),
-            category: "trigger".into(),
+            category: "source".into(),
             jac_node: None,
             config: json!({}),
         }
@@ -137,7 +160,7 @@ mod tests {
     #[test]
     fn validates_a_dag() {
         let workflow = WorkflowDocument {
-            nodes: vec![node("a"), node("b")],
+            nodes: vec![node("a"), WorkflowNode { category: "output".into(), ..node("b") }],
             edges: vec![edge("a-b", "a", "b")],
         };
         assert!(workflow.validate().is_ok());
@@ -146,13 +169,14 @@ mod tests {
     #[test]
     fn rejects_cycles() {
         let workflow = WorkflowDocument {
-            nodes: vec![node("a"), node("b")],
+            nodes: vec![
+                node("source"),
+                WorkflowNode { category: "output".into(), ..node("a") },
+                WorkflowNode { category: "output".into(), ..node("b") },
+            ],
             edges: vec![edge("a-b", "a", "b"), edge("b-a", "b", "a")],
         };
-        assert_eq!(
-            workflow.validate().unwrap_err(),
-            "Workflow graph contains a cycle"
-        );
+        assert_eq!(workflow.validate().unwrap_err(), "Workflow graph contains a cycle");
     }
 
     #[test]

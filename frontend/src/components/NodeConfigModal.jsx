@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Settings, Save, Sparkles } from 'lucide-react';
+import { SOURCE_EVENTS } from '../data/workflowNormalization';
 
 export default function NodeConfigModal({ node, onSave, onClose }) {
   const [config, setConfig] = useState(node.config || {});
@@ -12,6 +13,12 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
   const handleSave = (e) => {
     e.preventDefault();
     onSave(node.id, title, config);
+  };
+
+  const isSource = node.category === 'source';
+  const handleSourceEventChange = (eventType) => {
+    const defaults = SOURCE_EVENTS[eventType].config;
+    setConfig((prev) => ({ ...defaults, ...prev, eventType }));
   };
 
   return (
@@ -55,10 +62,21 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
           {/* Dynamic Configuration Fields */}
           <div className="space-y-3 pt-2">
             <h4 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider font-mono">
-              Configuration Keys
+              {isSource ? 'Trigger Event' : 'Configuration Keys'}
             </h4>
+            {isSource && (
+              <select
+                value={config.eventType || 'trigger_email'}
+                onChange={(e) => handleSourceEventChange(e.target.value)}
+                className="w-full bg-neutral-900 border border-orange-500/40 rounded-lg px-3 py-2 text-xs text-neutral-100 font-mono focus:outline-none focus:border-orange-400"
+              >
+                {Object.entries(SOURCE_EVENTS).map(([eventType, event]) => (
+                  <option key={eventType} value={eventType}>{event.title}</option>
+                ))}
+              </select>
+            )}
 
-            {Object.entries(config).map(([key, val]) => (
+            {Object.entries(config).filter(([key]) => !isSource || key !== 'eventType').map(([key, val]) => (
               <div key={key}>
                 <label className="block text-[11px] font-mono text-neutral-400 mb-1">
                   {key}

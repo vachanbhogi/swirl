@@ -14,10 +14,11 @@ import {
   Plug,
   GitBranch,
   Send
+  ,Radio
 } from 'lucide-react';
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
 
-const ICON_MAP = { Zap, Sparkles, Command, Plug, GitBranch, Send };
+const ICON_MAP = { Zap, Sparkles, Command, Plug, GitBranch, Send, Radio };
 
 export default function WhiteboardCard({
   nodes,
@@ -163,6 +164,7 @@ export default function WhiteboardCard({
 
   const handleDeleteNode = (e, nodeId) => {
     e.stopPropagation();
+    if (nodes.find((node) => node.id === nodeId)?.category === 'source') return;
     setNodes((prev) => prev.filter((n) => n.id !== nodeId));
     setEdges((prev) => prev.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
@@ -289,6 +291,7 @@ export default function WhiteboardCard({
                     isRunning ? 'node-running' : ''
                   } ${node.status === 'success' ? 'node-success' : ''} ${
                     isSelected ? 'selected' : ''
+                  } ${node.category === 'source' ? 'source-block' : ''}
                   } absolute z-10 p-3.5 rounded-xl border relative shadow-xl transition-transform hover:-translate-y-0.5`}
                 >
                   {/* Left Connection Port */}
@@ -317,9 +320,9 @@ export default function WhiteboardCard({
                         <IconComp className="w-4 h-4" />
                       </div>
                       <div className="overflow-hidden">
-                        <h4 className="text-xs font-bold text-slate-100 truncate">{node.title}</h4>
-                        <p className="text-[10px] text-slate-400 font-mono truncate">
-                          {node.category.toUpperCase()} • {node.type}
+                      <h4 className="text-xs font-bold text-slate-100 truncate">{node.title}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">
+                          {node.category === 'source' ? 'ENTRYPOINT • TRIGGER ROUTER' : `${node.category.toUpperCase()} • ${node.type}`}
                         </p>
                       </div>
                     </div>
@@ -327,7 +330,7 @@ export default function WhiteboardCard({
                     <div className="flex items-center gap-1 shrink-0">
                       {isRunning && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
                       {node.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                      <button
+                      {node.category !== 'source' && <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenConfigModal(node);
@@ -336,7 +339,7 @@ export default function WhiteboardCard({
                         title="Edit Parameters"
                       >
                         <Settings className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                       <button
                         onClick={(e) => handleDeleteNode(e, node.id)}
                         className="p-1 rounded bg-white/10 hover:bg-rose-500/30 text-slate-400 hover:text-rose-300 transition"

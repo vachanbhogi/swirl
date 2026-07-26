@@ -4,6 +4,7 @@
  */
 
 export const BLOCK_CATEGORIES = [
+  { id: 'source', name: 'Workflow Source', color: '#F97316', bg: 'rgba(249, 115, 22, 0.15)', border: '#FB923C', icon: 'Radio' },
   { id: 'trigger', name: 'Triggers', color: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.15)', border: '#A78BFA', icon: 'Zap' },
   { id: 'ai', name: 'AI & LLM Transforms', color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.15)', border: '#FBBF24', icon: 'Sparkles' },
   { id: 'mac', name: 'macOS Automation', color: '#06B6D4', bg: 'rgba(6, 182, 212, 0.15)', border: '#67E8F9', icon: 'Command' },
@@ -13,6 +14,7 @@ export const BLOCK_CATEGORIES = [
 ];
 
 export const BLOCK_LIBRARY = [
+  // Source is mandatory and is rendered by the canvas; it is not draggable.
   // Triggers
   {
     type: 'trigger_email',
@@ -247,13 +249,15 @@ export const BLOCK_LIBRARY = [
 // Initial Starter Workflow
 export const INITIAL_NODES = [
   {
-    id: 'node-1',
-    type: 'trigger_email',
-    title: 'On Email Received',
-    category: 'trigger',
+    id: 'workflow-source',
+    type: 'source',
+    title: 'Source',
+    category: 'source',
+    jacNode: 'SourceBlock',
     x: 60,
     y: 120,
     config: {
+      eventType: 'trigger_email',
       mailbox: 'Inbox',
       filterSubject: 'Urgent Action',
       checkIntervalSec: 15
@@ -306,7 +310,7 @@ export const INITIAL_NODES = [
 ];
 
 export const INITIAL_EDGES = [
-  { id: 'edge-1-2', source: 'node-1', target: 'node-2', sourcePort: 'text', targetPort: 'text' },
+  { id: 'edge-1-2', source: 'workflow-source', target: 'node-2', sourcePort: 'event', targetPort: 'text' },
   { id: 'edge-2-3', source: 'node-2', target: 'node-3', sourcePort: 'summary', targetPort: 'text' },
   { id: 'edge-2-4', source: 'node-2', target: 'node-4', sourcePort: 'actionItems', targetPort: 'text' }
 ];
@@ -455,6 +459,15 @@ node WorkflowBlock {
     }
 }
 
+node SourceBlock :WorkflowBlock: {
+    can execute(ctx: dict) -> dict {
+        print(f"⚡ [SourceBlock] Triggered source event: {self.config.get('eventType', 'trigger_email')}");
+        self.status = "success";
+        ctx["triggerType"] = self.config.get("eventType", "trigger_email");
+        return ctx;
+    }
+}
+
 node TriggerBlock :WorkflowBlock: {
     can execute(ctx: dict) -> dict {
         print(f"⚡ [TriggerBlock] Triggered event for: {self.title}");
@@ -531,7 +544,8 @@ with entry {
   nodes.forEach((n, idx) => {
     const varName = `node_${n.id.replace(/-/g, '_')}`;
     let blockClass = 'WorkflowBlock';
-    if (n.category === 'trigger') blockClass = 'TriggerBlock';
+    if (n.category === 'source') blockClass = 'SourceBlock';
+    else if (n.category === 'trigger') blockClass = 'TriggerBlock';
     else if (n.category === 'ai') blockClass = 'LLMTransformBlock';
     else if (n.category === 'mac') blockClass = 'MacAppBlock';
     else if (n.category === 'mcp') blockClass = 'MCPToolBlock';

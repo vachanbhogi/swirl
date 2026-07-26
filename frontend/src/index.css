@@ -92,6 +92,7 @@ body {
 
 /* Block Category Color Tokens */
 .block-cat-trigger,
+.block-cat-source,
 .block-cat-ai,
 .block-cat-mac,
 .block-cat-mcp,
@@ -99,6 +100,17 @@ body {
 .block-cat-output {
   background: #171717;
   border: 1px solid #262626;
+}
+
+.source-block {
+  border-color: #f97316 !important;
+  background: #1c1410;
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.25), 0 8px 24px rgba(249, 115, 22, 0.12);
+}
+
+.source-block .block-port {
+  border-color: #fb923c;
+  background: #431407;
 }
 
 .node-running {

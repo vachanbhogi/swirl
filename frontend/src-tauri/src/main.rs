@@ -51,6 +51,29 @@ fn execute_node(
     mcp: &State<'_, McpState>,
 ) -> Result<Value, MacActionResult> {
     match node.category.as_str() {
+        "source" => {
+            let event_type = node
+                .config
+                .get("eventType")
+                .and_then(Value::as_str)
+                .unwrap_or("trigger_email");
+            let output = json!({
+                "status": "triggered",
+                "triggerType": event_type,
+                "timestampMs": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or(0),
+                "payload": node.config
+            });
+            context.insert("trigger".into(), output.clone());
+            context.insert("triggerType".into(), Value::String(event_type.into()));
+            context.insert(
+                "text".into(),
+                Value::String(format!("Swirl source event: {event_type}")),
+            );
+            Ok(output)
+        }
         "trigger" => {
             let output = json!({
                 "status": "triggered",

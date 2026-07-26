@@ -7,6 +7,7 @@ import JacCodeViewer from './components/JacCodeViewer';
 import PromptBar from './components/PromptBar';
 import ExecutionInspector from './components/ExecutionInspector';
 import { INITIAL_NODES, INITIAL_EDGES } from './data/blockDefinitions';
+import { normalizeWorkflow } from './data/workflowNormalization';
 import {
   compileWorkflowPrompt,
   executeWorkflow,
@@ -16,8 +17,9 @@ import {
 } from './services/tauriBridge';
 
 export default function App() {
-  const [nodes, setNodes] = useState(INITIAL_NODES);
-  const [edges, setEdges] = useState(INITIAL_EDGES);
+  const initialWorkflow = normalizeWorkflow(INITIAL_NODES, INITIAL_EDGES);
+  const [nodes, setNodes] = useState(initialWorkflow.nodes);
+  const [edges, setEdges] = useState(initialWorkflow.edges);
   const [isExecuting, setIsExecuting] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -84,7 +86,10 @@ export default function App() {
       if (!isTauriEnvironment()) {
         throw new Error('Run the Tauri desktop app to execute native workflows.');
       }
-      const summary = await executeWorkflow({ nodes, edges });
+      const workflow = normalizeWorkflow(nodes, edges);
+      setNodes(workflow.nodes);
+      setEdges(workflow.edges);
+      const summary = await executeWorkflow(workflow);
       setExecutionResults(summary.results || {});
       setNodes((prev) => prev.map((node) => (
         summary.completedNodeIds?.includes(node.id) ? { ...node, status: 'success' } : node
@@ -104,11 +109,12 @@ export default function App() {
     try {
       const result = await compileWorkflowPrompt(prompt, true);
       if (!result?.nodes) throw new Error('Jac compiler returned no workflow graph.');
-      setNodes(result.nodes);
-      setEdges(result.edges || []);
+      const workflow = normalizeWorkflow(result.nodes, result.edges || []);
+      setNodes(workflow.nodes);
+      setEdges(workflow.edges);
       setSelectedNodeId(null);
       setLogs((prev) => [...prev, {
-        time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${result.nodes.length} workflow blocks.`
+        time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${workflow.nodes.length} blocks from Jac LLM.`
       }]);
     } catch (error) {
       setLogs((prev) => [...prev, {
@@ -122,7 +128,12 @@ export default function App() {
   const handleCodeView = async (nextValue) => {
     setShowCodeView(nextValue);
     if (nextValue && isTauriEnvironment()) {
-      try { setGeneratedCode(await generateJacSource({ nodes, edges })); } catch (error) {
+        try {
+          const workflow = normalizeWorkflow(nodes, edges);
+          setNodes(workflow.nodes);
+          setEdges(workflow.edges);
+          setGeneratedCode(await generateJacSource(workflow));
+        } catch (error) {
         setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), type: 'error', prefix: 'code', message: error.message }]);
       }
     }
@@ -131,8 +142,8 @@ export default function App() {
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
 
   const handleClearCanvas = () => {
-    setNodes([]);
-    setEdges([]);
+    setNodes(initialWorkflow.nodes);
+    setEdges(initialWorkflow.edges);
     setSelectedNodeId(null);
     setActiveNodeId(null);
   };
@@ -193,4 +204,3 @@ export default function App() {
     </div>
   );
 }
-
