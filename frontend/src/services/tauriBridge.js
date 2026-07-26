@@ -27,6 +27,16 @@ export async function executeWorkflow(workflow, context = {}, approvals = []) {
   });
 }
 
+export async function startWorkflow(workflow, context = {}, approvals = []) {
+  return invokeBackend('start_workflow', {
+    request: { ...workflow, context, approvals }
+  });
+}
+
+export async function stopWorkflow(runId) {
+  return invokeBackend('stop_workflow', { runId });
+}
+
 export async function generateJacSource(workflow) {
   return invokeBackend('generate_jac_source', { workflow });
 }

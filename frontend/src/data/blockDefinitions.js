@@ -305,6 +305,7 @@ export const INITIAL_NODES = [
     y: 120,
     config: {
       eventType: 'trigger_email',
+      runMode: 'once',
       mailbox: 'Inbox',
       filterSubject: '',
       checkIntervalSec: 15,

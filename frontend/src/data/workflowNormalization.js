@@ -17,25 +17,25 @@ export const SOURCE_EVENTS = {
     type: 'trigger_voice',
     title: 'Voice Command',
     description: 'Start when a voice command or wake word is spoken.',
-    config: { wakeWord: 'Hey Swirl', language: 'en-US', listenTimeoutSec: 10 }
+    config: { wakeWord: 'Hey Swirl', language: 'en-US', listenTimeoutSec: 30 }
   },
   trigger_webhook: {
     type: 'trigger_webhook',
     title: 'HTTP Webhook',
     description: 'Start when an incoming HTTP payload is posted to an endpoint.',
-    config: { path: '/api/v1/webhook', method: 'POST', authRequired: false }
+    config: { host: '127.0.0.1', port: 8787, path: '/api/v1/webhook', method: 'POST', authRequired: false, authToken: '' }
   },
   trigger_clipboard: {
     type: 'trigger_clipboard',
     title: 'Clipboard Listener',
     description: 'Start when text is copied to the macOS clipboard.',
-    config: { watchText: true, minChars: 5 }
+    config: { watchText: true, minChars: 1, checkIntervalSec: 1 }
   },
   trigger_file: {
     type: 'trigger_file',
     title: 'On File Created',
     description: 'Start when a file appears in the watched Finder folder.',
-    config: { watchPath: '~/Downloads', filePattern: '*' }
+    config: { watchPath: '~/Downloads', filePattern: '*', checkIntervalSec: 2 }
   }
 };
 
@@ -43,17 +43,21 @@ export const sourceConfig = (eventType = 'trigger_email', config = {}) => {
   const normalizedEventType = SOURCE_EVENTS[eventType] ? eventType : 'trigger_email';
   return {
     eventType: normalizedEventType,
+    runMode: 'once',
     ...SOURCE_EVENTS[normalizedEventType].config,
-    ...config,
-    ...(normalizedEventType === 'trigger_email' ? { filterSubject: '' } : {})
+    ...config
   };
 };
+
+export const changeSourceEvent = (eventType, current = {}) => sourceConfig(eventType, {
+  eventType,
+  runMode: current.runMode === 'continuous' ? 'continuous' : 'once'
+});
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 export function createSourceNode(config = {}, x = 32, y = 140) {
   const normalizedConfig = sourceConfig(config.eventType || 'trigger_email', config);
-  const event = SOURCE_EVENTS[normalizedConfig.eventType];
   return {
     id: SOURCE_ID,
     type: 'source',
@@ -102,10 +106,20 @@ export function normalizeWorkflow(nodes = [], edges = []) {
   const retainedNodes = inputNodes
     .filter((node) => !removedIds.has(node.id) && node.category !== 'trigger')
     .map((node) => ({ ...node, status: node.status || 'idle' }));
-  const nodeIds = new Set(retainedNodes.map((node) => node.id));
+  const nodeIds = new Set([SOURCE_ID, ...retainedNodes.map((node) => node.id)]);
   const rewiredEdges = inputEdges
-    .filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target) && nodeIds.has(edge.source) && nodeIds.has(edge.target))
-    .map((edge) => ({ ...edge }));
+    .map((edge) => ({
+      ...edge,
+      source: edge.source === existingSourceId ? SOURCE_ID : edge.source,
+      target: edge.target === existingSourceId ? SOURCE_ID : edge.target
+    }))
+    .filter((edge) => (
+      edge.target !== SOURCE_ID
+      && !removedIds.has(edge.source)
+      && !removedIds.has(edge.target)
+      && nodeIds.has(edge.source)
+      && nodeIds.has(edge.target)
+    ));
 
   // Preserve every former trigger branch by connecting its outgoing targets to Source.
   const oldTriggerIds = new Set(legacyTriggers.map((node) => node.id));

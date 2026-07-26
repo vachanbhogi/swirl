@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Settings, Save, Sparkles } from 'lucide-react';
-import { SOURCE_EVENTS } from '../data/workflowNormalization';
+import { X, Settings, Save } from 'lucide-react';
+import { changeSourceEvent, SOURCE_EVENTS } from '../data/workflowNormalization';
 
 export default function NodeConfigModal({ node, onSave, onClose }) {
   const [config, setConfig] = useState(node.config || {});
@@ -17,8 +17,7 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
 
   const isSource = node.category === 'source';
   const handleSourceEventChange = (eventType) => {
-    const defaults = SOURCE_EVENTS[eventType].config;
-    setConfig((prev) => ({ ...defaults, ...prev, eventType }));
+    setConfig((prev) => changeSourceEvent(eventType, prev));
   };
 
   return (
@@ -84,7 +83,16 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
                 <label className="block text-[11px] font-mono text-neutral-400 mb-1">
                   {key}
                 </label>
-                {typeof val === 'number' ? (
+                {isSource && key === 'runMode' ? (
+                  <select
+                    value={val}
+                    onChange={(e) => handleFieldChange(key, e.target.value)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600"
+                  >
+                    <option value="once">Once — stop after one event</option>
+                    <option value="continuous">Continuous — re-arm until stopped</option>
+                  </select>
+                ) : typeof val === 'number' ? (
                   <input
                     type="number"
                     value={val}

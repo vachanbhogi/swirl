@@ -1,5 +1,8 @@
+import os;
 import from backend.workflow_agent {
-    prompt_to_workflow_rules, plan_workflow
+    compile_llm_workflow, prompt_to_workflow_rules, plan_workflow,
+    workflow_draft_to_ast,
+    WorkflowDraft, WorkflowNodeDraft, WorkflowEdgeDraft
 }
 import from backend.mac_control {
     classify_mac_action, validate_mac_action
@@ -45,6 +48,65 @@ test "workflow planner follows graph topology" {
     plan = plan_workflow(workflow);
     assert plan[0]["id"] == "a";
     assert plan[1]["id"] == "b";
+}
+
+
+test "typed LLM draft becomes a canonical source workflow" {
+    draft = WorkflowDraft(
+        source_event_type="trigger_webhook",
+        source_config_json="{\"port\": 9000, \"path\": \"/notes\"}",
+        run_mode="continuous",
+        nodes=[
+            WorkflowNodeDraft(
+                id="note", block_type="mac_notes", title="Save Note",
+                config_json="{\"app\": \"Notes\", \"action\": \"create_note\"}"
+            )
+        ],
+        edges=[
+            WorkflowEdgeDraft(source="workflow-source", target="note")
+        ],
+    );
+    ast = workflow_draft_to_ast(
+        "Whenever a webhook arrives, save a note", draft
+    );
+    assert ast.source == "llm";
+    assert ast.nodes[0]["id"] == "workflow-source";
+    assert ast.nodes[0]["config"]["runMode"] == "continuous";
+    assert ast.nodes[0]["config"]["port"] == 9000;
+    assert ast.nodes[1]["type"] == "mac_notes";
+}
+
+
+test "typed LLM draft rejects unsupported blocks" {
+    draft = WorkflowDraft(
+        source_event_type="trigger_email",
+        nodes=[
+            WorkflowNodeDraft(
+                id="bad", block_type="made_up_tool", title="Bad"
+            )
+        ],
+        edges=[
+            WorkflowEdgeDraft(source="workflow-source", target="bad")
+        ],
+    );
+    try {
+        workflow_draft_to_ast("Do something unsupported", draft);
+        assert False;
+    } except ValueError as error {
+        assert "Unsupported generated block type" in str(error);
+    }
+}
+
+
+test "configured Jac LLM generates a live workflow when explicitly enabled" {
+    if os.getenv("SWIRL_RUN_LLM_SMOKE", "") == "1" {
+        ast = compile_llm_workflow(
+            "Whenever a new email arrives, summarize it and create an Apple Note"
+        );
+        assert ast.source == "llm";
+        assert ast.nodes[0]["category"] == "source";
+        assert len(ast.edges) > 0;
+    }
 }
 
 

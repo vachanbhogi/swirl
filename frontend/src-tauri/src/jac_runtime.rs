@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -11,7 +12,7 @@ use tauri::{AppHandle, Manager};
 const SENTINEL: &str = "__SWIRL_JSON__";
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn runtime_script(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn runtime_script(app: &AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join("backend/swirl_runtime.jac"));
@@ -73,6 +74,60 @@ fn project_root(script: &Path) -> &Path {
         .unwrap_or_else(|| script.parent().unwrap_or(Path::new(".")))
 }
 
+fn non_empty_env(key: &str) -> Option<OsString> {
+    std::env::var_os(key).filter(|value| !value.is_empty())
+}
+
+fn dotenv_paths(script: &Path) -> Vec<PathBuf> {
+    let root = project_root(script);
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let frontend_dir = manifest_dir.parent().unwrap_or(&manifest_dir);
+    let workspace_dir = frontend_dir.parent().unwrap_or(frontend_dir);
+    let mut paths = vec![
+        root.join(".env"),
+        root.join("frontend/.env"),
+        frontend_dir.join(".env"),
+        workspace_dir.join(".env"),
+    ];
+    if let Ok(current_dir) = std::env::current_dir() {
+        paths.push(current_dir.join(".env"));
+        paths.push(current_dir.join("frontend/.env"));
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn dotenv_value(script: &Path, key: &str) -> Option<String> {
+    dotenv_paths(script)
+        .into_iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .flat_map(|contents| contents.lines().map(str::to_owned).collect::<Vec<_>>())
+        .find_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (name, raw) = line.split_once('=')?;
+            if name.trim() != key {
+                return None;
+            }
+            let value = raw.trim().trim_matches(['"', '\'']);
+            (!value.is_empty()).then(|| value.to_string())
+        })
+}
+
+fn nvidia_api_key(script: &Path) -> Option<OsString> {
+    non_empty_env("NVIDIA_NIM_API_KEY")
+        .or_else(|| non_empty_env("NVIDIA_API_KEY"))
+        .or_else(|| dotenv_value(script, "NVIDIA_NIM_API_KEY").map(Into::into))
+        .or_else(|| dotenv_value(script, "NVIDIA_API_KEY").map(Into::into))
+}
+
+pub fn nvidia_api_key_configured(script: &Path) -> bool {
+    nvidia_api_key(script).is_some()
+}
+
 pub fn invoke(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, String> {
     let script = runtime_script(app)?;
     let payload_path = unique_payload_path(app)?;
@@ -81,14 +136,20 @@ pub fn invoke(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
     fs::write(&payload_path, encoded)
         .map_err(|error| format!("Cannot write Jac runtime payload: {error}"))?;
 
-    let output = Command::new(jac_binary(app))
+    let mut jac_command = Command::new(jac_binary(app));
+    jac_command
         .arg("run")
         .arg("--no-cache")
         .arg(&script)
         .arg(command)
         .arg(&payload_path)
-        .current_dir(project_root(&script))
-        .output();
+        .current_dir(project_root(&script));
+    if let Some(api_key) = nvidia_api_key(&script) {
+        // Standard NVIDIA inference keys are sufficient. LiteLLM's NVIDIA NIM
+        // adapter reads NVIDIA_NIM_API_KEY; no admin key is required.
+        jac_command.env("NVIDIA_NIM_API_KEY", api_key);
+    }
+    let output = jac_command.output();
     let _ = fs::remove_file(&payload_path);
     let output = output.map_err(|error| format!("Cannot launch Jac runtime: {error}"))?;
 

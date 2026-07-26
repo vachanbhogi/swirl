@@ -6,6 +6,7 @@ mod macos;
 mod mcp;
 mod models;
 mod storage;
+mod triggers;
 
 use macos::{MacActionRequest, MacActionResult};
 use mcp::{McpManager, McpServerConfig, McpState};
@@ -13,10 +14,20 @@ use models::{
     ExecutionEvent, ExecutionSummary, WorkflowDocument, WorkflowExecutionRequest, WorkflowNode,
 };
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const WORKFLOW_EVENT: &str = "swirl-workflow-event";
+static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Default)]
+struct WorkflowRunState(Mutex<HashMap<String, Arc<AtomicBool>>>);
 
 fn emit(app: &AppHandle, event: ExecutionEvent) {
     let _ = app.emit(WORKFLOW_EVENT, event);
@@ -31,12 +42,29 @@ fn event(
 ) -> ExecutionEvent {
     ExecutionEvent {
         event: event.into(),
+        run_id: None,
+        iteration: None,
         node_id: node.map(|value| value.id.clone()),
         title: node.map(|value| value.title.clone()),
         status: status.map(str::to_string),
         message,
         output,
     }
+}
+
+fn run_event(
+    event_name: &str,
+    run_id: &str,
+    iteration: u64,
+    node: Option<&WorkflowNode>,
+    status: Option<&str>,
+    message: Option<String>,
+    output: Option<Value>,
+) -> ExecutionEvent {
+    let mut value = event(event_name, node, status, message, output);
+    value.run_id = Some(run_id.to_string());
+    value.iteration = Some(iteration);
+    value
 }
 
 fn context_object(value: Value) -> Map<String, Value> {
@@ -258,14 +286,9 @@ fn execute_node(
                 .get("prompt")
                 .and_then(Value::as_str)
                 .unwrap_or("Summarize concisely");
-            let llm_configured = [
-                "OPENAI_API_KEY",
-                "ANTHROPIC_API_KEY",
-                "GOOGLE_API_KEY",
-                "BYLLM_DEFAULT_MODEL",
-            ]
-            .iter()
-            .any(|key| std::env::var_os(key).is_some());
+            let llm_configured = jac_runtime::runtime_script(app)
+                .map(|script| jac_runtime::nvidia_api_key_configured(&script))
+                .unwrap_or(false);
             let llm_result = llm_configured
                 .then(|| {
                     jac_runtime::invoke(
@@ -470,9 +493,60 @@ fn backend_health(app: AppHandle) -> Value {
     jac_runtime::health(&app)
 }
 
+fn validate_generated_catalog(workflow: &WorkflowDocument) -> Result<(), String> {
+    const SOURCE_EVENTS: &[&str] = &[
+        "trigger_email",
+        "trigger_file",
+        "trigger_cron",
+        "trigger_clipboard",
+        "trigger_webhook",
+        "trigger_voice",
+    ];
+    const BLOCKS: &[(&str, &str)] = &[
+        ("llm_summarize", "ai"),
+        ("llm_extract", "ai"),
+        ("llm_classifier", "ai"),
+        ("mac_notes", "mac"),
+        ("mac_finder", "mac"),
+        ("mac_notification", "mac"),
+        ("mac_terminal", "mac"),
+        ("mcp_fetch", "mcp"),
+        ("mcp_fs", "mcp"),
+        ("mcp_search", "mcp"),
+        ("logic_if", "logic"),
+        ("output_slack", "output"),
+    ];
+    for node in &workflow.nodes {
+        if node.category == "source" {
+            let event_type = node
+                .config
+                .get("eventType")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Generated Source is missing eventType".to_string())?;
+            if node.block_type != "source" || !SOURCE_EVENTS.contains(&event_type) {
+                return Err(format!("Unsupported generated Source event: {event_type}"));
+            }
+            let run_mode = node
+                .config
+                .get("runMode")
+                .and_then(Value::as_str)
+                .unwrap_or("once");
+            if !matches!(run_mode, "once" | "continuous") {
+                return Err(format!("Unsupported generated Source run mode: {run_mode}"));
+            }
+        } else if !BLOCKS.contains(&(node.block_type.as_str(), node.category.as_str())) {
+            return Err(format!(
+                "Unsupported generated block/category pair: {}/{}",
+                node.block_type, node.category
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn compile_prompt(app: AppHandle, prompt: String, use_llm: Option<bool>) -> Result<Value, String> {
-    jac_runtime::invoke(
+    let generated = jac_runtime::invoke(
         &app,
         if use_llm.unwrap_or(false) {
             "prompt-llm"
@@ -480,7 +554,12 @@ fn compile_prompt(app: AppHandle, prompt: String, use_llm: Option<bool>) -> Resu
             "prompt"
         },
         &json!({ "prompt": prompt }),
-    )
+    )?;
+    let workflow: WorkflowDocument = serde_json::from_value(generated.clone())
+        .map_err(|error| format!("Jac LLM returned a malformed workflow: {error}"))?;
+    workflow.validate()?;
+    validate_generated_catalog(&workflow)?;
+    Ok(generated)
 }
 
 #[tauri::command]
@@ -626,6 +705,318 @@ fn execute_workflow(
     );
     let _ = storage::save_trace(&app, &serde_json::to_value(&summary).unwrap_or(Value::Null));
     Ok(summary)
+}
+
+#[tauri::command]
+fn start_workflow(
+    app: AppHandle,
+    request: WorkflowExecutionRequest,
+    runs: State<'_, WorkflowRunState>,
+) -> Result<Value, String> {
+    request.workflow.validate()?;
+    let workflow_value =
+        serde_json::to_value(&request.workflow).map_err(|error| error.to_string())?;
+    let plan_value = jac_runtime::invoke(&app, "plan", &workflow_value)?;
+    let planned_nodes: Vec<WorkflowNode> = serde_json::from_value(
+        plan_value
+            .get("plan")
+            .cloned()
+            .ok_or_else(|| "Jac planner returned no execution plan".to_string())?,
+    )
+    .map_err(|error| format!("Invalid Jac execution plan: {error}"))?;
+    let source = planned_nodes
+        .first()
+        .filter(|node| node.category == "source")
+        .ok_or_else(|| "Jac execution plan must begin with Source".to_string())?;
+    let run_mode = source
+        .config
+        .get("runMode")
+        .and_then(Value::as_str)
+        .unwrap_or("once")
+        .to_string();
+    if !matches!(run_mode.as_str(), "once" | "continuous") {
+        return Err("Source runMode must be once or continuous".into());
+    }
+
+    let run_id = format!(
+        "run-{}-{}",
+        std::process::id(),
+        RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let cancelled = Arc::new(AtomicBool::new(false));
+    runs.0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(run_id.clone(), cancelled.clone());
+
+    let thread_app = app.clone();
+    let thread_run_id = run_id.clone();
+    let thread_run_mode = run_mode.clone();
+    std::thread::spawn(move || {
+        println!(
+            "[Swirl][Workflow][{}] started in {} mode ({} planned nodes)",
+            thread_run_id,
+            thread_run_mode,
+            planned_nodes.len()
+        );
+        let source = planned_nodes.first().expect("Source checked before spawn");
+        let mut iteration = 1_u64;
+        let mut terminal_event = "stopped";
+        loop {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            println!(
+                "[Swirl][Workflow][{}] arming '{}' for iteration {}",
+                thread_run_id, source.title, iteration
+            );
+            emit(
+                &thread_app,
+                run_event(
+                    "armed",
+                    &thread_run_id,
+                    iteration,
+                    Some(source),
+                    Some("running"),
+                    Some(format!(
+                        "Waiting for {}",
+                        source
+                            .config
+                            .get("eventType")
+                            .and_then(Value::as_str)
+                            .unwrap_or("source event")
+                    )),
+                    None,
+                ),
+            );
+
+            let source_event = match triggers::wait_for_source(source, &cancelled) {
+                Ok(Some(value)) => value,
+                Ok(None) => break,
+                Err(error) => {
+                    terminal_event = "failed";
+                    eprintln!(
+                        "[Swirl][Workflow][{}] Source failed: {}",
+                        thread_run_id, error
+                    );
+                    emit(
+                        &thread_app,
+                        run_event(
+                            "failed",
+                            &thread_run_id,
+                            iteration,
+                            Some(source),
+                            Some("error"),
+                            Some(error),
+                            None,
+                        ),
+                    );
+                    break;
+                }
+            };
+            let source_output = source_event.output();
+            println!(
+                "[Swirl][Workflow][{}] Source triggered: {}",
+                thread_run_id, source_event.trigger_type
+            );
+            emit(
+                &thread_app,
+                run_event(
+                    "triggered",
+                    &thread_run_id,
+                    iteration,
+                    Some(source),
+                    Some("success"),
+                    Some(format!("{} received", source_event.trigger_type)),
+                    Some(source_output.clone()),
+                ),
+            );
+
+            let mut context = context_object(request.context.clone());
+            context.insert("trigger".into(), source_output.clone());
+            context.insert(
+                "triggerType".into(),
+                Value::String(source_event.trigger_type.clone()),
+            );
+            context.insert(
+                "triggerTimestamp".into(),
+                Value::Number(source_event.timestamp_ms.into()),
+            );
+            context.insert("payload".into(), source_event.payload.clone());
+            context.insert("text".into(), Value::String(source_event.text.clone()));
+            if source_event.trigger_type == "trigger_email" {
+                context.insert("email".into(), source_event.payload.clone());
+            }
+
+            let mut results = HashMap::from([(source.id.clone(), source_output)]);
+            let mut completed = vec![source.id.clone()];
+            let mut failed_node_id = None;
+            for node in planned_nodes.iter().skip(1) {
+                if cancelled.load(Ordering::Relaxed) {
+                    break;
+                }
+                println!(
+                    "[Swirl][Workflow][{}] starting node '{}' ({})",
+                    thread_run_id, node.title, node.category
+                );
+                emit(
+                    &thread_app,
+                    run_event(
+                        "node_start",
+                        &thread_run_id,
+                        iteration,
+                        Some(node),
+                        Some("running"),
+                        None,
+                        None,
+                    ),
+                );
+                let mcp = thread_app.state::<McpState>();
+                match execute_node(
+                    &thread_app,
+                    node,
+                    &mut context,
+                    request.approvals.contains(&node.id),
+                    &mcp,
+                ) {
+                    Ok(output) => {
+                        println!(
+                            "[Swirl][Workflow][{}] completed node '{}'",
+                            thread_run_id, node.title
+                        );
+                        context.insert(format!("node:{}", node.id), output.clone());
+                        results.insert(node.id.clone(), output.clone());
+                        completed.push(node.id.clone());
+                        emit(
+                            &thread_app,
+                            run_event(
+                                "node_complete",
+                                &thread_run_id,
+                                iteration,
+                                Some(node),
+                                Some("success"),
+                                None,
+                                Some(output),
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        terminal_event = "failed";
+                        failed_node_id = Some(node.id.clone());
+                        let output = serde_json::to_value(&error).unwrap_or(Value::Null);
+                        emit(
+                            &thread_app,
+                            run_event(
+                                if error.approval_required {
+                                    "approval_required"
+                                } else {
+                                    "node_error"
+                                },
+                                &thread_run_id,
+                                iteration,
+                                Some(node),
+                                Some("error"),
+                                error.error.clone(),
+                                Some(output.clone()),
+                            ),
+                        );
+                        results.insert(node.id.clone(), output);
+                        break;
+                    }
+                }
+            }
+
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            let success = failed_node_id.is_none();
+            let summary = ExecutionSummary {
+                success,
+                context: Value::Object(context),
+                results,
+                completed_node_ids: completed,
+                failed_node_id,
+            };
+            let summary_value = serde_json::to_value(&summary).unwrap_or(Value::Null);
+            let _ = storage::save_trace(&thread_app, &summary_value);
+            if !success {
+                emit(
+                    &thread_app,
+                    run_event(
+                        "failed",
+                        &thread_run_id,
+                        iteration,
+                        None,
+                        Some("error"),
+                        Some("Workflow stopped after a node failure".into()),
+                        Some(summary_value),
+                    ),
+                );
+                break;
+            }
+            if thread_run_mode == "once" {
+                terminal_event = "complete";
+                emit(
+                    &thread_app,
+                    run_event(
+                        "complete",
+                        &thread_run_id,
+                        iteration,
+                        None,
+                        Some("success"),
+                        Some("Workflow completed".into()),
+                        Some(summary_value),
+                    ),
+                );
+                break;
+            }
+            emit(
+                &thread_app,
+                run_event(
+                    "iteration_complete",
+                    &thread_run_id,
+                    iteration,
+                    None,
+                    Some("success"),
+                    Some(format!("Iteration {iteration} completed; Source re-armed")),
+                    Some(summary_value),
+                ),
+            );
+            iteration += 1;
+        }
+
+        if terminal_event == "stopped" {
+            println!("[Swirl][Workflow][{}] stopped", thread_run_id);
+            emit(
+                &thread_app,
+                run_event(
+                    "stopped",
+                    &thread_run_id,
+                    iteration,
+                    None,
+                    Some("idle"),
+                    Some("Workflow stopped".into()),
+                    None,
+                ),
+            );
+        }
+        if let Ok(mut active) = thread_app.state::<WorkflowRunState>().0.lock() {
+            active.remove(&thread_run_id);
+        }
+    });
+
+    Ok(json!({ "runId": run_id, "runMode": run_mode }))
+}
+
+#[tauri::command]
+fn stop_workflow(run_id: String, runs: State<'_, WorkflowRunState>) -> Result<Value, String> {
+    let active = runs.0.lock().map_err(|error| error.to_string())?;
+    let Some(cancelled) = active.get(&run_id) else {
+        return Ok(json!({ "stopped": false, "runId": run_id }));
+    };
+    cancelled.store(true, Ordering::Relaxed);
+    println!("[Swirl][Workflow][{run_id}] stop requested");
+    Ok(json!({ "stopped": true, "runId": run_id }))
 }
 
 #[tauri::command]
@@ -779,28 +1170,6 @@ fn toggle_notch(app: AppHandle) -> Result<bool, String> {
     }
 }
 
-#[cfg(test)]
-mod execution_tests {
-    use super::*;
-
-    #[test]
-    fn local_email_fallback_creates_a_real_summary() {
-        let email = json!({
-            "subject": "Project update",
-            "sender": "person@example.com"
-        });
-        let (summary, actions) = local_email_summary(
-            "The project is on schedule. Please send the final review by Friday. Thanks.",
-            Some(&email),
-        );
-        assert!(summary.contains("Subject: Project update"));
-        assert!(summary.contains("The project is on schedule."));
-        assert!(summary.contains("Action items:"));
-        assert_eq!(actions.len(), 1);
-        assert!(!summary.contains("LLM transform prepared"));
-    }
-}
-
 fn main() {
     use tauri_plugin_global_shortcut::{
         Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
@@ -814,6 +1183,7 @@ fn main() {
                 app.handle(),
                 builtins,
             ))));
+            app.manage(WorkflowRunState::default());
 
             if let Some(notch_win) = app.get_webview_window("notch") {
                 if let Ok(Some(monitor)) = notch_win.primary_monitor() {
@@ -855,6 +1225,8 @@ fn main() {
             compile_prompt,
             generate_jac_source,
             execute_workflow,
+            start_workflow,
+            stop_workflow,
             execute_mac_action,
             execute_mac_applescript,
             execute_mac_shell,
@@ -878,9 +1250,36 @@ fn main() {
             event,
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
+            if let Ok(active) = app_handle.state::<WorkflowRunState>().0.lock() {
+                for cancelled in active.values() {
+                    cancelled.store(true, Ordering::Relaxed);
+                }
+            }
             if let Ok(mut manager) = app_handle.state::<McpState>().0.lock() {
                 manager.stop_all();
             }
         }
     });
+}
+
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+
+    #[test]
+    fn local_email_fallback_creates_a_real_summary() {
+        let email = json!({
+            "subject": "Project update",
+            "sender": "person@example.com"
+        });
+        let (summary, actions) = local_email_summary(
+            "The project is on schedule. Please send the final review by Friday. Thanks.",
+            Some(&email),
+        );
+        assert!(summary.contains("Subject: Project update"));
+        assert!(summary.contains("The project is on schedule."));
+        assert!(summary.contains("Action items:"));
+        assert_eq!(actions.len(), 1);
+        assert!(!summary.contains("LLM transform prepared"));
+    }
 }

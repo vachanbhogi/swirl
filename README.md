@@ -14,12 +14,26 @@ Requirements:
 - Node.js and npm
 
 ```bash
+export NVIDIA_API_KEY="nvapi-..."
+jac install
+
 cd frontend
 npm ci
 npm run tauri:dev
 ```
 
 Swirl locates Jac from `SWIRL_JAC_BIN`, an app-bundled `bin/jac`, `~/.local/bin/jac`, `~/.jac/bin/jac`, Homebrew, or `PATH`.
+AI Builder generation uses NVIDIA NIM through Jac/LiteLLM with
+`meta/llama-3.3-70b-instruct`. Swirl accepts either `NVIDIA_API_KEY` (the name
+used by NVIDIA's hosted examples) or `NVIDIA_NIM_API_KEY` (the name expected by
+LiteLLM), inherits it from the Tauri process, and never asks for or stores the
+key in the app.
+
+Voice Source workflows long-poll the teammate-owned local Whisper service at
+`http://127.0.0.1:8765/v1/events/next` by default. Override it with
+`SWIRL_WHISPER_URL`. The endpoint accepts
+`{"wakeWord","language","timeoutSec"}` and returns
+`{"transcript","timestampMs","confidence"}`; HTTP 204 or 408 means no event yet.
 
 ## Validate the backend
 
@@ -27,6 +41,9 @@ Swirl locates Jac from `SWIRL_JAC_BIN`, an app-bundled `bin/jac`, `~/.local/bin/
 jac check main.jac backend
 jac clean --data --force
 jac test backend/engine_tests.jac -v
+
+# Optional live provider smoke test
+SWIRL_RUN_LLM_SMOKE=1 jac test backend/engine_tests.jac
 
 cd frontend/src-tauri
 cargo test
