@@ -29,10 +29,10 @@ The product ships as a native `.app` bundle rather than a hosted web frontend. T
 Swirl bridges the gap between natural language intent, visual Scratch-style block building, and native **Jaclang** agent execution:
 
 1. **Prompt-to-Workflow AI Compiler:** Users describe what they want in plain English (e.g., *"When I get a high priority email, summarize it using LLM, create a task in Apple Notes, and notify me on Slack"*). Jac-powered LLM walkers generate the visual node graph automatically.
-2. **Scratch-Style Visual Block Editor:** Drag-and-drop colorful blocks representing Jac Nodes (`TriggerNode`, `LLMTransformNode`, `MacAppNode`, `MCPToolNode`, `ConditionNode`, `OutputNode`).
+2. **Scratch-Style Visual Block Editor:** Drag-and-drop blocks representing Jac Nodes (`TriggerNode`, `LLMTransformNode`, `MacAppNode`, `MCPToolNode`, `ConditionNode`, `OutputNode`).
 3. **Bi-Directional Jac Code Synchronization:** Real-time generation of human-readable, executable `.jac` source code. Non-technical users see blocks; developers can switch to the Jac code view to inspect, export, or tweak the generated Jac Walkers.
 4. **macOS App & MCP Bridge:** Native tool adapters for Apple Notes, Mail, Finder, System Settings, Slack, Web Scraping, and any stdio/HTTP Model Context Protocol (MCP) server.
-5. **Live Walker Visual Inspector:** As the Jac walker traverses the graph, nodes light up in real-time, showing execution flow, intermediate state, and outputs.
+5. **Live Walker Visual Inspector:** As the Jac walker traverses the graph, nodes update state in real-time, showing execution flow, intermediate state, and outputs.
 6. **Native Tauri Desktop Runtime:** The UI, Rust command layer, Jac execution runtime, and MCP processes run together as a signed local macOS application with no separately hosted frontend or backend service.
 
 ---
@@ -42,7 +42,7 @@ Swirl bridges the gap between natural language intent, visual Scratch-style bloc
 | Feature | Description | Jac Technical Underpinnings |
 | :--- | :--- | :--- |
 | **Prompt-to-Blocks AI** | Natural language text bar translates user prompts into visual Scratch workflow nodes. | `by llm()` Jac function and `PromptToWorkflowWalker` AST emitter. |
-| **Visual Block Editor** | Colorful, Scratch-inspired drag-and-drop node canvas with snapped connectors and parameter inputs inside the Tauri WebView. | TypeScript canvas state maps 1:1 to Jac graph node topology. |
+| **Visual Block Editor** | Scratch-inspired drag-and-drop node canvas with snapped connectors and parameter inputs inside the Tauri WebView. | TypeScript canvas state maps 1:1 to Jac graph node topology. |
 | **Jac Native Code Emitter** | Real-time code panel showing generated `.jac` source code matching the visual layout. | Jac AST Serializer converting visual block graph into `.jac` code files. |
 | **macOS App Control** | Control local Mac applications (Notes, Finder, Safari, Calendar, Mail, Terminal). | `MacControlWalker` invokes permission-gated Tauri/Rust commands for AppleScript and macOS APIs. |
 | **MCP Integration** | Connect to external or local Model Context Protocol tools via stdio/HTTP. | `MCPBridgeWalker` handles JSON-RPC while the Tauri process manages local child processes and transport lifecycles. |
