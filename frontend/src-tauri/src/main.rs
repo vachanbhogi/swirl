@@ -1,78 +1,553 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+// Prevents an additional console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::process::Command;
-use serde::{Deserialize, Serialize};
+mod jac_runtime;
+mod macos;
+mod mcp;
+mod models;
+mod storage;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MacActionResult {
-    pub success: bool,
-    pub output: Option<String>,
-    pub error: Option<String>,
+use macos::{MacActionRequest, MacActionResult};
+use mcp::{McpManager, McpServerConfig, McpState};
+use models::{
+    ExecutionEvent, ExecutionSummary, WorkflowDocument, WorkflowExecutionRequest, WorkflowNode,
+};
+use serde_json::{json, Map, Value};
+use std::collections::HashMap;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const WORKFLOW_EVENT: &str = "swirl-workflow-event";
+
+fn emit(app: &AppHandle, event: ExecutionEvent) {
+    let _ = app.emit(WORKFLOW_EVENT, event);
 }
 
-/// Native Tauri Command: Executes AppleScript on macOS directly via Rust Command
-#[tauri::command]
-fn execute_mac_applescript(script: String) -> MacActionResult {
-    println!("💻 [Tauri Rust Native] Executing AppleScript:\n{}", script);
-    
-    match Command::new("osascript").arg("-e").arg(&script).output() {
-        Ok(output) => {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                MacActionResult {
-                    success: true,
-                    output: Some(stdout),
-                    error: None,
+fn event(
+    event: &str,
+    node: Option<&WorkflowNode>,
+    status: Option<&str>,
+    message: Option<String>,
+    output: Option<Value>,
+) -> ExecutionEvent {
+    ExecutionEvent {
+        event: event.into(),
+        node_id: node.map(|value| value.id.clone()),
+        title: node.map(|value| value.title.clone()),
+        status: status.map(str::to_string),
+        message,
+        output,
+    }
+}
+
+fn context_object(value: Value) -> Map<String, Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+fn execute_node(
+    app: &AppHandle,
+    node: &WorkflowNode,
+    context: &mut Map<String, Value>,
+    approved: bool,
+    mcp: &State<'_, McpState>,
+) -> Result<Value, MacActionResult> {
+    match node.category.as_str() {
+        "trigger" => {
+            let output = json!({
+                "status": "triggered",
+                "triggerType": node.block_type,
+                "timestampMs": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or(0)
+            });
+            context.insert("trigger".into(), output.clone());
+            Ok(output)
+        }
+        "ai" => {
+            let input = context
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| node.config.get("text").and_then(Value::as_str))
+                .unwrap_or_default();
+            let instruction = node
+                .config
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or("Summarize concisely");
+            let llm_configured = [
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "GOOGLE_API_KEY",
+                "BYLLM_DEFAULT_MODEL",
+            ]
+            .iter()
+            .any(|key| std::env::var_os(key).is_some());
+            let llm_result = llm_configured
+                .then(|| {
+                    jac_runtime::invoke(
+                        app,
+                        "llm-transform",
+                        &json!({ "text": input, "instruction": instruction }),
+                    )
+                })
+                .transpose();
+            let (summary, mode, fallback_error) = match llm_result {
+                Ok(Some(value)) => (
+                    value
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    "by-llm",
+                    Value::Null,
+                ),
+                Ok(None) => {
+                    let preview: String = input.chars().take(500).collect();
+                    (
+                        if preview.is_empty() {
+                            format!("Jac LLM transform prepared: {instruction}")
+                        } else {
+                            format!("{instruction}: {preview}")
+                        },
+                        "local-fallback",
+                        Value::Null,
+                    )
                 }
+                Err(error) => {
+                    let preview: String = input.chars().take(500).collect();
+                    (
+                        format!("{instruction}: {preview}"),
+                        "local-fallback",
+                        Value::String(error),
+                    )
+                }
+            };
+            let output = json!({
+                "summary": summary,
+                "actionItems": [],
+                "engine": "Jac LLMTransformBlock",
+                "mode": mode,
+                "fallbackError": fallback_error
+            });
+            context.insert(
+                "text".into(),
+                output.get("summary").cloned().unwrap_or(Value::Null),
+            );
+            Ok(output)
+        }
+        "mac" => {
+            let mut params = node.config.clone();
+            if let Some(object) = params.as_object_mut() {
+                if !object.contains_key("content") {
+                    if let Some(text) = context.get("text") {
+                        object.insert("content".into(), text.clone());
+                    }
+                }
+                if !object.contains_key("text") {
+                    if let Some(text) = context.get("text") {
+                        object.insert("text".into(), text.clone());
+                    }
+                }
+            }
+            let request = MacActionRequest {
+                app: node
+                    .config
+                    .get("app")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| {
+                        if node.block_type.contains("finder") {
+                            "Finder"
+                        } else {
+                            "System"
+                        }
+                    })
+                    .to_string(),
+                action: node
+                    .config
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or("display_notification")
+                    .to_string(),
+                params,
+                approved,
+            };
+            let result = macos::execute(&request);
+            if result.success {
+                Ok(serde_json::to_value(result).unwrap_or(Value::Null))
             } else {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                MacActionResult {
+                Err(result)
+            }
+        }
+        "mcp" => {
+            let server = node
+                .config
+                .get("server")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let tool = node
+                .config
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let arguments = node
+                .config
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(context.clone()));
+            let result = mcp
+                .0
+                .lock()
+                .map_err(|error| MacActionResult {
                     success: false,
                     output: None,
-                    error: Some(stderr),
+                    error: Some(error.to_string()),
+                    approval_required: false,
+                    risk: "low".into(),
+                })?
+                .call(server, tool, arguments)
+                .map_err(|error| MacActionResult {
+                    success: false,
+                    output: None,
+                    error: Some(error),
+                    approval_required: false,
+                    risk: "low".into(),
+                })?;
+            if let Some(text) = result.get("content").cloned() {
+                context.insert("text".into(), text);
+            }
+            Ok(result)
+        }
+        "logic" => {
+            let value = context
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let expected = node
+                .config
+                .get("matchString")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let operator = node
+                .config
+                .get("operator")
+                .and_then(Value::as_str)
+                .unwrap_or("contains");
+            let matched = match operator {
+                "equals" => value == expected,
+                "not_contains" => !value.contains(expected),
+                _ => value.contains(expected),
+            };
+            context.insert("condition".into(), Value::Bool(matched));
+            Ok(json!({ "matched": matched, "operator": operator, "expected": expected }))
+        }
+        "output" => {
+            let webhook = node
+                .config
+                .get("webhookUrl")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if webhook.starts_with("https://") && !webhook.contains("MOCK") {
+                if !approved {
+                    return Err(MacActionResult {
+                        success: false,
+                        output: None,
+                        error: Some(
+                            "Approval is required before posting to an external webhook".into(),
+                        ),
+                        approval_required: true,
+                        risk: "medium".into(),
+                    });
                 }
+                let payload = json!({
+                    "text": context.get("text").and_then(Value::as_str).unwrap_or("Swirl workflow completed")
+                });
+                let response = reqwest::blocking::Client::new()
+                    .post(webhook)
+                    .json(&payload)
+                    .send()
+                    .map_err(|error| MacActionResult {
+                        success: false,
+                        output: None,
+                        error: Some(error.to_string()),
+                        approval_required: false,
+                        risk: "medium".into(),
+                    })?;
+                Ok(json!({ "status": response.status().as_u16() }))
+            } else {
+                Ok(json!({ "status": "skipped", "reason": "No configured production webhook" }))
             }
         }
-        Err(err) => MacActionResult {
-            success: false,
-            output: None,
-            error: Some(err.to_string()),
-        },
+        _ => Ok(json!({ "status": "executed", "config": node.config })),
     }
 }
 
-/// Native Tauri Command: Executes Zsh / Bash CLI command on macOS
 #[tauri::command]
-fn execute_mac_shell(command: String) -> MacActionResult {
-    println!("⚡ [Tauri Rust Native] Executing Shell Command: {}", command);
+fn backend_health(app: AppHandle) -> Value {
+    jac_runtime::health(&app)
+}
 
-    match Command::new("/bin/zsh").arg("-c").arg(&command).output() {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            MacActionResult {
-                success: output.status.success(),
-                output: if stdout.is_empty() { None } else { Some(stdout) },
-                error: if stderr.is_empty() { None } else { Some(stderr) },
+#[tauri::command]
+fn compile_prompt(app: AppHandle, prompt: String, use_llm: Option<bool>) -> Result<Value, String> {
+    jac_runtime::invoke(
+        &app,
+        if use_llm.unwrap_or(false) {
+            "prompt-llm"
+        } else {
+            "prompt"
+        },
+        &json!({ "prompt": prompt }),
+    )
+}
+
+#[tauri::command]
+fn generate_jac_source(app: AppHandle, workflow: WorkflowDocument) -> Result<String, String> {
+    workflow.validate()?;
+    let value = serde_json::to_value(workflow).map_err(|error| error.to_string())?;
+    jac_runtime::invoke(&app, "code", &value)?
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "Jac code generator returned no source".into())
+}
+
+#[tauri::command]
+fn execute_workflow(
+    app: AppHandle,
+    request: WorkflowExecutionRequest,
+    mcp: State<'_, McpState>,
+) -> Result<ExecutionSummary, String> {
+    request.workflow.validate()?;
+    let workflow_value =
+        serde_json::to_value(&request.workflow).map_err(|error| error.to_string())?;
+    let plan_value = jac_runtime::invoke(&app, "plan", &workflow_value)?;
+    let planned_nodes: Vec<WorkflowNode> = serde_json::from_value(
+        plan_value
+            .get("plan")
+            .cloned()
+            .ok_or_else(|| "Jac planner returned no execution plan".to_string())?,
+    )
+    .map_err(|error| format!("Invalid Jac execution plan: {error}"))?;
+
+    emit(
+        &app,
+        event(
+            "start",
+            None,
+            Some("running"),
+            Some("WorkflowExecutorWalker started graph traversal".into()),
+            None,
+        ),
+    );
+
+    let mut context = context_object(request.context);
+    let mut results = HashMap::new();
+    let mut completed = Vec::new();
+    let mut failed_node_id = None;
+
+    for node in &planned_nodes {
+        emit(
+            &app,
+            event("node_start", Some(node), Some("running"), None, None),
+        );
+        match execute_node(
+            &app,
+            node,
+            &mut context,
+            request.approvals.contains(&node.id),
+            &mcp,
+        ) {
+            Ok(output) => {
+                context.insert(format!("node:{}", node.id), output.clone());
+                results.insert(node.id.clone(), output.clone());
+                completed.push(node.id.clone());
+                emit(
+                    &app,
+                    event(
+                        "node_complete",
+                        Some(node),
+                        Some("success"),
+                        None,
+                        Some(output),
+                    ),
+                );
+            }
+            Err(error) => {
+                failed_node_id = Some(node.id.clone());
+                let output = serde_json::to_value(&error).unwrap_or(Value::Null);
+                let event_name = if error.approval_required {
+                    "approval_required"
+                } else {
+                    "node_error"
+                };
+                emit(
+                    &app,
+                    event(
+                        event_name,
+                        Some(node),
+                        Some("error"),
+                        error.error.clone(),
+                        Some(output.clone()),
+                    ),
+                );
+                results.insert(node.id.clone(), output);
+                break;
             }
         }
-        Err(err) => MacActionResult {
-            success: false,
-            output: None,
-            error: Some(err.to_string()),
-        },
     }
+
+    let success = failed_node_id.is_none();
+    let summary = ExecutionSummary {
+        success,
+        context: Value::Object(context),
+        results,
+        completed_node_ids: completed,
+        failed_node_id,
+    };
+    emit(
+        &app,
+        event(
+            if success { "complete" } else { "failed" },
+            None,
+            Some(if success { "success" } else { "error" }),
+            Some(if success {
+                "Workflow graph traversal completed".into()
+            } else {
+                "Workflow paused or failed".into()
+            }),
+            Some(serde_json::to_value(&summary).unwrap_or(Value::Null)),
+        ),
+    );
+    let _ = storage::save_trace(&app, &serde_json::to_value(&summary).unwrap_or(Value::Null));
+    Ok(summary)
+}
+
+#[tauri::command]
+fn execute_mac_action(request: MacActionRequest) -> MacActionResult {
+    macos::execute(&request)
+}
+
+#[tauri::command]
+fn execute_mac_applescript(script: String) -> MacActionResult {
+    macos::execute_restricted_applescript(&script)
+}
+
+#[tauri::command]
+fn execute_mac_shell(command: String, approved: Option<bool>) -> MacActionResult {
+    macos::execute(&MacActionRequest {
+        app: "Terminal".into(),
+        action: "exec_shell".into(),
+        params: json!({ "command": command }),
+        approved: approved.unwrap_or(false),
+    })
+}
+
+#[tauri::command]
+fn register_mcp_server(config: McpServerConfig, state: State<'_, McpState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .register(config)
+}
+
+#[tauri::command]
+fn list_mcp_servers(state: State<'_, McpState>) -> Result<Vec<McpServerConfig>, String> {
+    Ok(state.0.lock().map_err(|error| error.to_string())?.configs())
+}
+
+#[tauri::command]
+fn remove_mcp_server(name: String, state: State<'_, McpState>) -> Result<bool, String> {
+    state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&name)
+}
+
+#[tauri::command]
+fn discover_mcp_tools(name: String, state: State<'_, McpState>) -> Result<Value, String> {
+    state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .discover(&name)
+}
+
+#[tauri::command]
+fn call_mcp_tool(
+    name: String,
+    tool: String,
+    arguments: Value,
+    state: State<'_, McpState>,
+) -> Result<Value, String> {
+    state
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .call(&name, &tool, arguments)
+}
+
+#[tauri::command]
+fn save_workflow(
+    app: AppHandle,
+    name: String,
+    workflow: WorkflowDocument,
+) -> Result<storage::WorkflowRecord, String> {
+    storage::save_workflow(&app, &name, workflow)
+}
+
+#[tauri::command]
+fn load_workflow(app: AppHandle, name: String) -> Result<storage::WorkflowRecord, String> {
+    storage::load_workflow(&app, &name)
+}
+
+#[tauri::command]
+fn list_workflows(app: AppHandle) -> Result<Vec<storage::WorkflowRecord>, String> {
+    storage::list_workflows(&app)
+}
+
+#[tauri::command]
+fn delete_workflow(app: AppHandle, name: String) -> Result<bool, String> {
+    storage::delete_workflow(&app, &name)
 }
 
 fn main() {
-    println!("🌀 Starting Swirl Tauri Desktop Application...");
-    
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .setup(|app| {
+            app.manage(McpState(std::sync::Mutex::new(McpManager::load(
+                app.handle(),
+            ))));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            backend_health,
+            compile_prompt,
+            generate_jac_source,
+            execute_workflow,
+            execute_mac_action,
             execute_mac_applescript,
-            execute_mac_shell
+            execute_mac_shell,
+            register_mcp_server,
+            list_mcp_servers,
+            remove_mcp_server,
+            discover_mcp_tools,
+            call_mcp_tool,
+            save_workflow,
+            load_workflow,
+            list_workflows,
+            delete_workflow
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running swirl tauri desktop application");
+        .build(tauri::generate_context!())
+        .expect("error while building Swirl Tauri desktop application");
+
+    app.run(|app_handle, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            if let Ok(mut manager) = app_handle.state::<McpState>().0.lock() {
+                manager.stop_all();
+            }
+        }
+    });
 }

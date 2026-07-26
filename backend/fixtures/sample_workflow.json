@@ -1,0 +1,31 @@
+{
+  "nodes": [
+    {
+      "id": "node-1",
+      "type": "trigger_file",
+      "title": "On File Created",
+      "category": "trigger",
+      "config": {"watchPath": "~/Desktop"}
+    },
+    {
+      "id": "node-2",
+      "type": "mac_notification",
+      "title": "Mac Notification",
+      "category": "mac",
+      "config": {
+        "app": "System",
+        "action": "display_notification",
+        "text": "Done"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1-2",
+      "source": "node-1",
+      "target": "node-2",
+      "sourcePort": "out",
+      "targetPort": "in"
+    }
+  ]
+}

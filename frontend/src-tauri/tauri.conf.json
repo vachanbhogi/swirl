@@ -27,12 +27,20 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http: https: ws: wss: data: blob:"
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost",
+      "devCsp": "default-src 'self' http://localhost:5173; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval' http://localhost:5173; connect-src ipc: http://ipc.localhost https://ipc.localhost http://localhost:5173 ws://localhost:5173"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "../../backend/workflow_agent.jac",
+      "../../backend/mac_control.jac",
+      "../../backend/mcp_bridge.jac",
+      "../../backend/code_generator.jac",
+      "../../backend/swirl_runtime.jac"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,6 +50,10 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "AI Visual Scratch-Block Editor & macOS MCP Control Center Powered by Jaclang",
-    "longDescription": "Swirl combines visual Scratch-style workflow building with native Jaclang multi-agent execution and macOS AppleScript automation."
+    "longDescription": "Swirl combines visual Scratch-style workflow building with native Jaclang multi-agent execution and macOS AppleScript automation.",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "infoPlist": "Info.plist"
+    }
   }
 }

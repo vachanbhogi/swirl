@@ -8,21 +8,22 @@
 
 ## Phase 1: Environment & Jac Core Setup (0-30 mins)
 
-1. **Activate Python Virtual Environment & Install Jac:**
+1. **Install and verify the Jac CLI:**
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install jaclang fastapi uvicorn requests pydantic
-   ```
-2. **Verify Jac Installation:**
-   ```bash
+   python3 -m pip install jaclang==0.34.7
    jac --version
    ```
-3. **Structure Backend Directory (`/backend`):**
+2. **Structure the Jac core (`/backend`):**
    - Create `backend/workflow_agent.jac`: Core Jac nodes, walker graph executor, and LLM transform rules.
    - Create `backend/mcp_bridge.jac`: MCP tool discovery and JSON-RPC execution walker.
    - Create `backend/mac_control.jac`: AppleScript wrappers for macOS apps (Notes, Finder, Mail, System).
-   - Create `backend/main.py`: FastAPI server exposing Jac execution endpoints & WebSocket updates to UI.
+   - Create `backend/code_generator.jac`: Visual graph to Jac source walker.
+   - Create `backend/swirl_runtime.jac`: Structured adapter invoked by the native process.
+3. **Use `frontend/src-tauri/src/` for the native boundary:**
+   - Typed Tauri commands and local events.
+   - Permission-gated AppleScript and filesystem operations.
+   - MCP stdio/HTTP process lifecycle.
+   - Tauri-managed workflow and trace persistence.
 
 ---
 
@@ -32,14 +33,14 @@
    - Define `WorkflowBlock` base node and concrete block classes (`TriggerBlock`, `LLMTransformBlock`, `MacAppBlock`, `MCPToolBlock`, `ConditionBlock`).
    - Implement `WorkflowExecutorWalker` to step through graph nodes.
    - Implement `PromptToWorkflowWalker` using `by llm()` to map text prompts to JSON block ASTs.
-2. **Implement macOS Control Adapter (`mac_control.py` / `mac_control.jac`):**
+2. **Implement the macOS policy walker and Rust executor (`mac_control.jac` / `src-tauri/src/macos.rs`):**
    - Create AppleScript handlers for:
      - **Apple Notes:** `osascript -e 'tell application "Notes" to make new note with properties {body:"..."}'`
      - **Finder:** File list & directory operations.
      - **System:** `osascript -e 'display notification "..." with title "Swirl Workflow"'`
-3. **Implement MCP Bridge (`mcp_bridge.py` / `mcp_bridge.jac`):**
+3. **Implement the MCP Bridge (`mcp_bridge.jac` / `src-tauri/src/mcp.rs`):**
    - Connect stdio / HTTP MCP servers.
-   - Expose tools list endpoint (`/api/mcp/tools`).
+   - Expose discovery and execution through typed Tauri commands.
 
 ---
 
@@ -65,11 +66,11 @@
 ## Phase 4: Integration & Bi-Directional Compiler (180-240 mins)
 
 1. **Prompt-to-Blocks Pipeline:**
-   - User types: *"Summarize my latest notes and save to Desktop file"* -> POST to `/api/prompt-to-workflow` -> Jac Walker generates AST -> React Flow renders visual block pipeline.
+   - User types: *"Summarize my latest notes and save to Desktop file"* -> Tauri `compile_prompt` command -> Jac Walker generates AST -> React renders the visual block pipeline.
 2. **Live Jac Code Generation:**
    - As blocks are added or edited on canvas, frontend calls Jac code generator to sync `.jac` source code view in real time.
 3. **Live Execution & Walker Visualizer:**
-   - User clicks **"▶ Run Workflow"** -> POST to `/api/execute-workflow` -> Jac `WorkflowExecutorWalker` traverses graph -> WebSocket streams step events -> Active node glows green in UI.
+   - User clicks **"▶ Run Workflow"** -> Tauri `execute_workflow` command -> Jac `WorkflowExecutorWalker` plans graph traversal -> `swirl-workflow-event` streams native events -> Active node glows green in UI.
 
 ---
 

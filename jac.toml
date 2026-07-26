@@ -1,7 +1,7 @@
 [project]
 name = "swirl"
 version = "0.1.0"
-description = "Command-line Jac project"
+description = "Swirl local-first Jac graph-walker runtime"
 entry-point = "main.jac"
 kind = "cli"
 jac-version = "==0.34.7"
