@@ -1,0 +1,7 @@
+.jac/
+jac.local.toml
+dist/
+node_modules/
+.DS_Store
+fixtures/demo-vault/.obsidian/
+fixtures/demo-vault/Tomorrow Brief.md

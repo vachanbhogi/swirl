@@ -1,0 +1,1052 @@
+:root {
+    color: #17202A;
+    background: #E9EEF1;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-synthesis: none;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background:
+        linear-gradient(rgba(23, 32, 42, 0.035) 1px, transparent 1px),
+        #E9EEF1;
+    background-size: 100% 24px;
+}
+
+button,
+textarea {
+    font: inherit;
+}
+
+button,
+a,
+textarea {
+    outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid rgba(35, 100, 170, 0.34);
+    outline-offset: 3px;
+}
+
+button {
+    color: inherit;
+}
+
+button:disabled,
+textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+.quaze-app {
+    width: min(1480px, calc(100% - 40px));
+    margin: 20px auto;
+    padding: 0 34px 20px;
+    background: #F5F7F8;
+    border: 1px solid #CAD4DB;
+    box-shadow: 0 18px 55px rgba(23, 32, 42, 0.1);
+}
+
+.product-header {
+    min-height: 74px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    border-bottom: 1px solid #CAD4DB;
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.brand-mark,
+.loading-mark {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    background: #17202A;
+    color: #F5F7F8;
+    font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.08em;
+}
+
+.brand > span:last-child {
+    display: grid;
+    gap: 1px;
+}
+
+.brand strong {
+    font-size: 16px;
+    letter-spacing: -0.01em;
+}
+
+.brand small {
+    color: #64727C;
+    font-size: 12px;
+}
+
+.mode-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.mode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border: 1px solid #CAD4DB;
+    background: #FFFFFF;
+    color: #64727C;
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.connector-control {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    border: 1px solid #CAD4DB;
+    background: #FFFFFF;
+    color: #64727C;
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.connector-control > span {
+    padding: 5px 8px;
+}
+
+.connector-control select {
+    align-self: stretch;
+    min-width: 92px;
+    border: 0;
+    border-left: 1px solid #CAD4DB;
+    border-radius: 0;
+    background: #F5F7F8;
+    color: #17202A;
+    font: 650 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    cursor: pointer;
+}
+
+.connector-control select:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 3px solid rgba(35, 100, 170, 0.34);
+    outline-offset: 3px;
+}
+
+.connector-control select:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+.mode-label strong {
+    color: #17202A;
+    font-weight: 650;
+}
+
+.mode-blue {
+    border-color: rgba(35, 100, 170, 0.38);
+}
+
+.prompt-section {
+    padding: 42px 0 36px;
+    border-bottom: 1px solid #CAD4DB;
+}
+
+.prompt-heading,
+.section-heading,
+.artifact-heading,
+.subheading-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.eyebrow {
+    margin: 0 0 6px;
+    color: #2364AA;
+    font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+    margin-top: 0;
+}
+
+h1 {
+    max-width: 820px;
+    margin-bottom: 22px;
+    font-size: clamp(34px, 4vw, 56px);
+    line-height: 0.98;
+    letter-spacing: -0.055em;
+}
+
+h2 {
+    margin-bottom: 0;
+    font-size: 18px;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+}
+
+h3 {
+    margin-bottom: 0;
+    font-size: 13px;
+}
+
+.workflow-version,
+.count-label,
+.mono-tag,
+.artifact-state {
+    color: #64727C;
+    font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.prompt-section > label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.prompt-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.prompt-control textarea {
+    width: 100%;
+    min-height: 92px;
+    resize: vertical;
+    padding: 14px 16px;
+    border: 1px solid #AEBCC5;
+    border-radius: 0;
+    background: #FFFFFF;
+    color: #17202A;
+    line-height: 1.55;
+}
+
+.prompt-control textarea:hover:not(:disabled) {
+    border-color: #7E909C;
+}
+
+.compiler-notice {
+    margin: 10px 0 0;
+    color: #64727C;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.connector-safety {
+    margin: 6px 0 0;
+    color: #64727C;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.button {
+    min-height: 42px;
+    padding: 10px 15px;
+    border: 1px solid transparent;
+    border-radius: 0;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.button-primary {
+    background: #2364AA;
+    border-color: #2364AA;
+    color: #FFFFFF;
+}
+
+.button-primary:hover:not(:disabled) {
+    background: #194F87;
+    border-color: #194F87;
+}
+
+.button-secondary {
+    background: #FFFFFF;
+    border-color: #AEBCC5;
+}
+
+.button-secondary:hover:not(:disabled) {
+    border-color: #2364AA;
+    color: #2364AA;
+}
+
+.button-approval {
+    background: #B7791F;
+    border-color: #B7791F;
+    color: #FFFFFF;
+}
+
+.button-approval:hover:not(:disabled) {
+    background: #916015;
+    border-color: #916015;
+}
+
+.button-danger {
+    color: #B33A3A;
+}
+
+.button-danger:hover:not(:disabled) {
+    border-color: #B33A3A;
+    color: #8F2B2B;
+}
+
+.error-banner {
+    display: flex;
+    gap: 8px;
+    margin: 18px 0 0;
+    padding: 12px 14px;
+    border-left: 4px solid #B33A3A;
+    background: rgba(179, 58, 58, 0.08);
+    color: #7C2929;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.workflow-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 0.72fr) minmax(390px, 1.5fr) minmax(240px, 0.9fr);
+    gap: 0;
+    padding: 34px 0;
+    align-items: start;
+}
+
+.quiet-panel,
+.spine-panel {
+    min-width: 0;
+}
+
+.library-panel {
+    padding: 0 28px 0 0;
+}
+
+.spine-panel {
+    padding: 0 32px;
+    border-left: 1px solid #CAD4DB;
+    border-right: 1px solid #CAD4DB;
+}
+
+.inspector-panel {
+    padding: 0 0 0 28px;
+}
+
+.section-note,
+.empty-guidance {
+    margin: 8px 0 18px;
+    color: #64727C;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.library-list,
+.execution-spine,
+.event-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.library-list {
+    display: grid;
+    gap: 2px;
+}
+
+.library-list li {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 9px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid #DCE3E7;
+}
+
+.library-index,
+.event-sequence {
+    color: #7E909C;
+    font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.library-list strong {
+    display: block;
+    font-size: 12px;
+}
+
+.library-list small {
+    display: block;
+    margin-top: 3px;
+    color: #7E909C;
+    font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.run-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border: 1px solid #CAD4DB;
+    background: #FFFFFF;
+    font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap;
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #7E909C;
+}
+
+.status-running {
+    color: #2364AA;
+    border-color: rgba(35, 100, 170, 0.35);
+}
+
+.status-running .status-dot {
+    background: #2364AA;
+    animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+.status-awaiting {
+    color: #8A5A16;
+    border-color: rgba(183, 121, 31, 0.4);
+}
+
+.status-awaiting .status-dot {
+    background: #B7791F;
+}
+
+.status-succeeded {
+    color: #2E7D5B;
+    border-color: rgba(46, 125, 91, 0.4);
+}
+
+.status-succeeded .status-dot {
+    background: #2E7D5B;
+}
+
+.status-failed {
+    color: #B33A3A;
+    border-color: rgba(179, 58, 58, 0.4);
+}
+
+.status-failed .status-dot {
+    background: #B33A3A;
+}
+
+.execution-spine {
+    position: relative;
+}
+
+.execution-spine::before {
+    content: "";
+    position: absolute;
+    top: 29px;
+    bottom: 29px;
+    left: 25px;
+    width: 2px;
+    background: #CAD4DB;
+}
+
+.spine-step {
+    --step-color: #7E909C;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 36px;
+    align-items: center;
+    gap: 8px;
+    min-height: 64px;
+    margin-bottom: 7px;
+    border: 1px solid #D2DCE2;
+    background: #FFFFFF;
+    transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.spine-step::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--step-color);
+}
+
+.spine-step.is-selected {
+    border-color: var(--step-color);
+    box-shadow: 0 4px 0 rgba(23, 32, 42, 0.05);
+    transform: translateX(4px);
+}
+
+.step-running {
+    --step-color: #2364AA;
+}
+
+.step-awaiting {
+    --step-color: #B7791F;
+}
+
+.step-succeeded {
+    --step-color: #2E7D5B;
+}
+
+.step-failed {
+    --step-color: #B33A3A;
+}
+
+.step-skipped {
+    --step-color: #7E909C;
+    opacity: 0.72;
+}
+
+.step-select {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 50px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px 10px 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.step-node {
+    width: 32px;
+    height: 32px;
+    margin-left: 9px;
+    display: grid;
+    place-items: center;
+    border: 2px solid var(--step-color);
+    border-radius: 50%;
+    background: #F5F7F8;
+    color: var(--step-color);
+    font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.step-copy {
+    min-width: 0;
+}
+
+.step-title-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.step-title-line strong {
+    font-size: 13px;
+}
+
+.step-status,
+.step-type,
+.step-event,
+.step-evidence,
+.step-error {
+    font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.step-status {
+    color: var(--step-color);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.step-type,
+.step-event {
+    display: block;
+    margin-top: 3px;
+    color: #7E909C;
+}
+
+.step-evidence,
+.step-error {
+    display: block;
+    margin-top: 5px;
+    overflow: hidden;
+    color: #52616B;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.step-error {
+    color: #B33A3A;
+}
+
+.move-controls {
+    display: grid;
+    gap: 3px;
+    margin-right: 7px;
+}
+
+.move-controls button {
+    width: 28px;
+    height: 23px;
+    padding: 0;
+    border: 1px solid #CAD4DB;
+    background: #F5F7F8;
+    color: #52616B;
+    cursor: pointer;
+}
+
+.move-controls button:hover:not(:disabled) {
+    border-color: #2364AA;
+    color: #2364AA;
+}
+
+.inspector-list {
+    margin: 18px 0 0;
+}
+
+.inspector-list > div,
+.artifact-grid > div {
+    padding: 11px 0;
+    border-bottom: 1px solid #DCE3E7;
+}
+
+dt {
+    margin-bottom: 5px;
+    color: #7E909C;
+    font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: #34434D;
+    font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.trace-detail {
+    margin-top: 24px;
+}
+
+.subheading-row span {
+    color: #7E909C;
+    font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.event-list li {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 0;
+    border-bottom: 1px solid #DCE3E7;
+}
+
+.event-list strong {
+    display: block;
+    font-size: 11px;
+    text-transform: capitalize;
+}
+
+.event-list p,
+.event-list time {
+    margin: 3px 0 0;
+    color: #64727C;
+    font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.run-dock {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px;
+    align-items: center;
+    padding: 20px 0;
+    border-top: 1px solid #CAD4DB;
+    border-bottom: 1px solid #CAD4DB;
+}
+
+.validation-panel {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.55fr) minmax(280px, 1fr);
+    gap: 22px;
+    align-items: center;
+    padding-left: 14px;
+    border-left: 4px solid;
+}
+
+.validation-valid {
+    border-color: #2E7D5B;
+}
+
+.validation-valid .eyebrow {
+    color: #2E7D5B;
+}
+
+.validation-invalid {
+    border-color: #B33A3A;
+}
+
+.validation-invalid .eyebrow {
+    color: #B33A3A;
+}
+
+.validation-copy p,
+.validation-copy ul {
+    margin: 0;
+    color: #52616B;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.validation-copy ul {
+    padding-left: 17px;
+}
+
+.warning-list {
+    margin-top: 7px !important;
+    color: #8A5A16 !important;
+}
+
+.run-actions,
+.approval-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.run-button {
+    min-width: 158px;
+}
+
+.approval-panel,
+.artifact-panel {
+    margin-top: 20px;
+    padding: 22px 24px;
+    border: 1px solid #CAD4DB;
+    background: #FFFFFF;
+}
+
+.approval-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px;
+    align-items: center;
+    border-left: 5px solid #B7791F;
+    background: rgba(183, 121, 31, 0.055);
+}
+
+.approval-panel .eyebrow {
+    color: #B7791F;
+}
+
+.approval-panel p:last-child {
+    max-width: 720px;
+    margin: 8px 0 0;
+    color: #52616B;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.artifact-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    background: transparent;
+    border-style: dashed;
+}
+
+.artifact-empty > p {
+    max-width: 560px;
+    margin: 0;
+    color: #64727C;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.artifact-state {
+    padding: 5px 8px;
+    border: 1px solid #CAD4DB;
+    color: #52616B;
+}
+
+.artifact-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 0.65fr 1.4fr;
+    gap: 24px;
+    margin: 16px 0 0;
+}
+
+.artifact-grid ul {
+    margin: 0;
+    padding-left: 16px;
+}
+
+.product-footer {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    padding: 18px 0 0;
+    color: #64727C;
+    font-size: 11px;
+}
+
+.product-footer code {
+    margin-left: auto;
+    font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.loading-shell {
+    min-height: calc(100vh - 40px);
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 14px;
+}
+
+.loading-shell p {
+    color: #64727C;
+    font-size: 13px;
+}
+
+@keyframes status-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(35, 100, 170, 0.25);
+    }
+    50% {
+        box-shadow: 0 0 0 5px rgba(35, 100, 170, 0);
+    }
+}
+
+@media (max-width: 1060px) {
+    .workflow-layout {
+        grid-template-columns: minmax(170px, 0.65fr) minmax(400px, 1.5fr);
+    }
+
+    .inspector-panel {
+        grid-column: 1 / -1;
+        margin-top: 28px;
+        padding: 28px 0 0;
+        border-top: 1px solid #CAD4DB;
+    }
+
+    .inspector-list {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 20px;
+    }
+
+    .run-dock,
+    .approval-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .run-actions,
+    .approval-actions {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 720px) {
+    .quaze-app {
+        width: 100%;
+        margin: 0;
+        padding: 0 18px 20px;
+        border: 0;
+        box-shadow: none;
+    }
+
+    .product-header {
+        align-items: flex-start;
+        padding: 16px 0;
+    }
+
+    .mode-strip {
+        max-width: 190px;
+    }
+
+    .prompt-section {
+        padding: 30px 0 28px;
+    }
+
+    .prompt-heading {
+        display: block;
+    }
+
+    .workflow-version {
+        display: block;
+        margin: -10px 0 20px;
+    }
+
+    .prompt-control,
+    .workflow-layout,
+    .run-dock,
+    .validation-panel,
+    .artifact-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .prompt-control .button {
+        width: 100%;
+    }
+
+    .workflow-layout {
+        gap: 28px;
+    }
+
+    .library-panel,
+    .spine-panel,
+    .inspector-panel {
+        padding: 0;
+        border: 0;
+    }
+
+    .library-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 14px;
+    }
+
+    .spine-panel,
+    .inspector-panel {
+        padding-top: 28px;
+        border-top: 1px solid #CAD4DB;
+    }
+
+    .spine-step.is-selected {
+        transform: none;
+    }
+
+    .inspector-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 18px;
+    }
+
+    .run-dock {
+        gap: 20px;
+    }
+
+    .validation-panel {
+        gap: 10px;
+    }
+
+    .run-actions .button,
+    .approval-actions .button {
+        flex: 1 1 140px;
+    }
+
+    .artifact-empty {
+        display: block;
+    }
+
+    .artifact-empty > p {
+        margin-top: 10px;
+    }
+
+    .product-footer {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .product-footer code {
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 440px) {
+    .product-header {
+        display: block;
+    }
+
+    .mode-strip {
+        max-width: none;
+        justify-content: flex-start;
+        margin-top: 14px;
+    }
+
+    .mode-label {
+        flex: 1 1 150px;
+        justify-content: space-between;
+    }
+
+    .connector-control {
+        flex: 1 1 190px;
+        justify-content: space-between;
+    }
+
+    .library-list,
+    .inspector-list {
+        grid-template-columns: 1fr;
+    }
+
+    .spine-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .step-title-line {
+        display: block;
+    }
+
+    .step-status {
+        display: block;
+        margin-top: 4px;
+    }
+
+    .move-controls {
+        margin-right: 5px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
