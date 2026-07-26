@@ -60,6 +60,28 @@ impl McpServerConfig {
             _ => Err("MCP transport must be stdio or http".into()),
         }
     }
+
+    fn validate_runtime_requirements(&self) -> Result<(), String> {
+        let is_brave_search = self.name == "brave-search-mcp"
+            || self
+                .args
+                .iter()
+                .any(|arg| arg.contains("server-brave-search"));
+        if is_brave_search {
+            let configured = self
+                .env
+                .get("BRAVE_API_KEY")
+                .is_some_and(|value| !value.trim().is_empty())
+                || std::env::var("BRAVE_API_KEY").is_ok_and(|value| !value.trim().is_empty());
+            if !configured {
+                return Err(
+                    "Brave Search MCP requires BRAVE_API_KEY. Set it in the environment and restart Swirl."
+                        .into(),
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 struct McpSession {
@@ -67,6 +89,7 @@ struct McpSession {
     stdin: ChildStdin,
     messages: mpsc::Receiver<Value>,
     reader_thread: Option<thread::JoinHandle<()>>,
+    stderr_thread: Option<thread::JoinHandle<()>>,
     initialized: bool,
 }
 
@@ -75,6 +98,9 @@ impl McpSession {
         let _ = self.child.kill();
         let _ = self.child.wait();
         if let Some(reader) = self.reader_thread.take() {
+            let _ = reader.join();
+        }
+        if let Some(reader) = self.stderr_thread.take() {
             let _ = reader.join();
         }
     }
@@ -91,7 +117,7 @@ pub struct McpManager {
 pub struct McpState(pub Mutex<McpManager>);
 
 impl McpManager {
-    pub fn load(app: &AppHandle) -> Self {
+    pub fn load(app: &AppHandle, builtins: Vec<McpServerConfig>) -> Self {
         let config_dir = app
             .path()
             .app_data_dir()
@@ -99,13 +125,24 @@ impl McpManager {
             .join("mcp");
         let _ = fs::create_dir_all(&config_dir);
         let config_path = config_dir.join("servers.json");
-        let configs = fs::read(&config_path)
+        let persisted = fs::read(&config_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Vec<McpServerConfig>>(&bytes).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let mut configs: HashMap<String, McpServerConfig> = persisted
             .into_iter()
+            .filter(|config| config.validate().is_ok())
             .map(|config| (config.name.clone(), config))
             .collect();
+        for mut config in builtins {
+            if config.validate().is_err() {
+                continue;
+            }
+            if let Some(saved) = configs.get(&config.name) {
+                config.env.extend(saved.env.clone());
+            }
+            configs.insert(config.name.clone(), config);
+        }
         Self {
             configs,
             sessions: HashMap::new(),
@@ -157,6 +194,7 @@ impl McpManager {
     }
 
     fn spawn_session(config: &McpServerConfig) -> Result<McpSession, String> {
+        config.validate_runtime_requirements()?;
         let mut command = Command::new(
             config
                 .command
@@ -168,7 +206,7 @@ impl McpManager {
             .envs(&config.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         let mut child = command
             .spawn()
             .map_err(|error| format!("Cannot start MCP server {}: {error}", config.name))?;
@@ -180,6 +218,11 @@ impl McpManager {
             .stdout
             .take()
             .ok_or_else(|| "MCP stdout was not available".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "MCP stderr was not available".to_string())?;
+        let server_name = config.name.clone();
         let (sender, messages) = mpsc::channel();
         let reader_thread = thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
@@ -193,11 +236,20 @@ impl McpManager {
                 }
             }
         });
+        let stderr_thread = thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else {
+                    break;
+                };
+                eprintln!("[Swirl][MCP][{server_name}] {line}");
+            }
+        });
         Ok(McpSession {
             child,
             stdin,
             messages,
             reader_thread: Some(reader_thread),
+            stderr_thread: Some(stderr_thread),
             initialized: false,
         })
     }
@@ -457,5 +509,26 @@ mod tests {
             env: HashMap::new(),
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn brave_search_reports_missing_credentials_before_spawn() {
+        let config = McpServerConfig {
+            name: "brave-search-mcp".into(),
+            transport: "stdio".into(),
+            command: Some("npx".into()),
+            args: vec![
+                "-y".into(),
+                "@modelcontextprotocol/server-brave-search".into(),
+            ],
+            url: None,
+            env: HashMap::new(),
+        };
+        if std::env::var("BRAVE_API_KEY").is_err() {
+            assert_eq!(
+                config.validate_runtime_requirements().unwrap_err(),
+                "Brave Search MCP requires BRAVE_API_KEY. Set it in the environment and restart Swirl."
+            );
+        }
     }
 }

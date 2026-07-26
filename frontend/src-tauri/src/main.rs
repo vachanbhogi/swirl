@@ -43,6 +43,141 @@ fn context_object(value: Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
 
+fn mcp_arguments(app: &AppHandle, node: &WorkflowNode, context: &Map<String, Value>) -> Value {
+    let mut arguments = node
+        .config
+        .get("params")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let context_text = context
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match node.block_type.as_str() {
+        "mcp_fetch" => {
+            arguments.entry("url").or_insert_with(|| {
+                node.config
+                    .get("url")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String(context_text.into()))
+            });
+        }
+        "mcp_fs" => {
+            let configured_path = node
+                .config
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("$SWIRL_DOCUMENTS");
+            let documents = app
+                .path()
+                .document_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".into());
+            arguments.entry("path").or_insert_with(|| {
+                Value::String(configured_path.replace("$SWIRL_DOCUMENTS", &documents))
+            });
+        }
+        "mcp_search" => {
+            arguments.entry("query").or_insert_with(|| {
+                node.config
+                    .get("query")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String(context_text.into()))
+            });
+            arguments.entry("count").or_insert_with(|| {
+                node.config
+                    .get("maxResults")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Number(5.into()))
+            });
+        }
+        _ => {}
+    }
+    Value::Object(arguments)
+}
+
+fn mcp_result_text(result: &Value) -> Option<String> {
+    let text = result
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn local_email_summary(input: &str, email: Option<&Value>) -> (String, Vec<String>) {
+    let compact = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    let sentences = compact
+        .split_inclusive(['.', '!', '?'])
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect::<Vec<_>>();
+    let mut summary_body = sentences
+        .iter()
+        .take(3)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if summary_body.is_empty() {
+        summary_body = compact.chars().take(700).collect();
+    }
+    if summary_body.chars().count() > 700 {
+        summary_body = summary_body.chars().take(700).collect::<String>() + "…";
+    }
+
+    let action_words = [
+        "please",
+        "need to",
+        "must",
+        "action",
+        "due",
+        "deadline",
+        "required",
+        "can you",
+        "could you",
+        "follow up",
+        "reply",
+    ];
+    let action_items = sentences
+        .iter()
+        .filter(|sentence| {
+            let lowered = sentence.to_ascii_lowercase();
+            action_words.iter().any(|word| lowered.contains(word))
+        })
+        .take(5)
+        .map(|sentence| sentence.trim().to_string())
+        .collect::<Vec<_>>();
+
+    let mut formatted = if let Some(email) = email {
+        let subject = email
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or("No subject");
+        let sender = email
+            .get("sender")
+            .and_then(Value::as_str)
+            .unwrap_or("Unknown sender");
+        format!("From: {sender}\nSubject: {subject}\n\nSummary:\n{summary_body}")
+    } else {
+        format!("Summary:\n{summary_body}")
+    };
+    if !action_items.is_empty() {
+        formatted.push_str("\n\nAction items:\n");
+        formatted.push_str(
+            &action_items
+                .iter()
+                .map(|item| format!("• {item}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    (formatted, action_items)
+}
+
 fn execute_node(
     app: &AppHandle,
     node: &WorkflowNode,
@@ -140,40 +275,32 @@ fn execute_node(
                     )
                 })
                 .transpose();
+            let (local_summary, local_action_items) =
+                local_email_summary(input, context.get("email"));
             let (summary, mode, fallback_error) = match llm_result {
-                Ok(Some(value)) => (
-                    value
+                Ok(Some(value)) => {
+                    let generated = value
                         .get("text")
                         .and_then(Value::as_str)
                         .unwrap_or_default()
-                        .to_string(),
-                    "by-llm",
-                    Value::Null,
+                        .trim()
+                        .to_string();
+                    if generated.is_empty() {
+                        (local_summary.clone(), "local-extractive", Value::Null)
+                    } else {
+                        (generated, "by-llm", Value::Null)
+                    }
+                }
+                Ok(None) => (local_summary.clone(), "local-extractive", Value::Null),
+                Err(error) => (
+                    local_summary.clone(),
+                    "local-extractive",
+                    Value::String(error),
                 ),
-                Ok(None) => {
-                    let preview: String = input.chars().take(500).collect();
-                    (
-                        if preview.is_empty() {
-                            format!("Jac LLM transform prepared: {instruction}")
-                        } else {
-                            format!("{instruction}: {preview}")
-                        },
-                        "local-fallback",
-                        Value::Null,
-                    )
-                }
-                Err(error) => {
-                    let preview: String = input.chars().take(500).collect();
-                    (
-                        format!("{instruction}: {preview}"),
-                        "local-fallback",
-                        Value::String(error),
-                    )
-                }
             };
             let output = json!({
                 "summary": summary,
-                "actionItems": [],
+                "actionItems": local_action_items,
                 "engine": "Jac LLMTransformBlock",
                 "mode": mode,
                 "fallbackError": fallback_error
@@ -187,6 +314,18 @@ fn execute_node(
         "mac" => {
             let mut params = node.config.clone();
             if let Some(object) = params.as_object_mut() {
+                if node.block_type == "mac_notes" && !object.contains_key("title") {
+                    if let Some(subject) = context
+                        .get("email")
+                        .and_then(|email| email.get("subject"))
+                        .and_then(Value::as_str)
+                    {
+                        object.insert(
+                            "title".into(),
+                            Value::String(format!("Email Summary — {subject}")),
+                        );
+                    }
+                }
                 if !object.contains_key("content") {
                     if let Some(text) = context.get("text") {
                         object.insert("content".into(), text.clone());
@@ -238,11 +377,7 @@ fn execute_node(
                 .get("tool_name")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let arguments = node
-                .config
-                .get("params")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(context.clone()));
+            let arguments = mcp_arguments(app, node, context);
             let result = mcp
                 .0
                 .lock()
@@ -261,8 +396,8 @@ fn execute_node(
                     approval_required: false,
                     risk: "low".into(),
                 })?;
-            if let Some(text) = result.get("content").cloned() {
-                context.insert("text".into(), text);
+            if let Some(text) = mcp_result_text(&result) {
+                context.insert("text".into(), Value::String(text));
             }
             Ok(result)
         }
@@ -462,7 +597,11 @@ fn execute_workflow(
     let success = failed_node_id.is_none();
     println!(
         "[Swirl][Workflow] {}",
-        if success { "completed successfully" } else { "stopped with an error" }
+        if success {
+            "completed successfully"
+        } else {
+            "stopped with an error"
+        }
     );
     let summary = ExecutionSummary {
         success,
@@ -560,6 +699,46 @@ fn list_builtin_mcp_servers(app: AppHandle) -> Result<Value, String> {
     jac_runtime::invoke(&app, "mcp-servers", &json!({}))
 }
 
+fn builtin_mcp_configs(app: &AppHandle) -> Vec<McpServerConfig> {
+    let value = match jac_runtime::invoke(app, "mcp-servers", &json!({})) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("[Swirl][MCP] could not load Jac server catalog: {error}");
+            return Vec::new();
+        }
+    };
+    let mut configs: Vec<McpServerConfig> = match serde_json::from_value(
+        value
+            .get("servers")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new())),
+    ) {
+        Ok(configs) => configs,
+        Err(error) => {
+            eprintln!("[Swirl][MCP] invalid Jac server catalog: {error}");
+            return Vec::new();
+        }
+    };
+    let documents = app
+        .path()
+        .document_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".into());
+    for config in &mut configs {
+        for argument in &mut config.args {
+            if argument == "$SWIRL_DOCUMENTS" {
+                *argument = documents.clone();
+            }
+        }
+    }
+    println!(
+        "[Swirl][MCP] loaded {} built-in server definition(s) from Jac",
+        configs.len()
+    );
+    configs
+}
+
 #[tauri::command]
 fn save_workflow(
     app: AppHandle,
@@ -600,14 +779,40 @@ fn toggle_notch(app: AppHandle) -> Result<bool, String> {
     }
 }
 
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+
+    #[test]
+    fn local_email_fallback_creates_a_real_summary() {
+        let email = json!({
+            "subject": "Project update",
+            "sender": "person@example.com"
+        });
+        let (summary, actions) = local_email_summary(
+            "The project is on schedule. Please send the final review by Friday. Thanks.",
+            Some(&email),
+        );
+        assert!(summary.contains("Subject: Project update"));
+        assert!(summary.contains("The project is on schedule."));
+        assert!(summary.contains("Action items:"));
+        assert_eq!(actions.len(), 1);
+        assert!(!summary.contains("LLM transform prepared"));
+    }
+}
+
 fn main() {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            let builtins = builtin_mcp_configs(app.handle());
             app.manage(McpState(std::sync::Mutex::new(McpManager::load(
                 app.handle(),
+                builtins,
             ))));
 
             if let Some(notch_win) = app.get_webview_window("notch") {
@@ -616,26 +821,32 @@ fn main() {
                     let scale = monitor.scale_factor();
                     let screen_width = (size.width as f64) / scale;
                     let notch_x = (screen_width - 180.0) / 2.0;
-                    let _ = notch_win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                        x: notch_x,
-                        y: 0.0,
-                    }));
+                    let _ =
+                        notch_win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                            x: notch_x,
+                            y: 0.0,
+                        }));
                 }
             }
 
-            let shortcut_space = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER), Code::Space);
+            let shortcut_space = Shortcut::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
+                Code::Space,
+            );
             let app_handle = app.handle().clone();
-            let _ = app.global_shortcut().on_shortcut(shortcut_space, move |_app, _shortcut, event| {
-                if event.state() == ShortcutState::Pressed {
-                    if let Some(notch_win) = app_handle.get_webview_window("notch") {
-                        if notch_win.is_visible().unwrap_or(false) {
-                            let _ = notch_win.hide();
-                        } else {
-                            let _ = notch_win.show();
+            let _ =
+                app.global_shortcut()
+                    .on_shortcut(shortcut_space, move |_app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            if let Some(notch_win) = app_handle.get_webview_window("notch") {
+                                if notch_win.is_visible().unwrap_or(false) {
+                                    let _ = notch_win.hide();
+                                } else {
+                                    let _ = notch_win.show();
+                                }
+                            }
                         }
-                    }
-                }
-            });
+                    });
 
             Ok(())
         })

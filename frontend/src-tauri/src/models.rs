@@ -127,6 +127,30 @@ impl WorkflowDocument {
         if queue.len() != self.nodes.len() {
             return Err("Workflow graph contains a cycle".into());
         }
+        let source_id = self
+            .nodes
+            .iter()
+            .find(|node| node.category == "source")
+            .expect("source count validated")
+            .id
+            .as_str();
+        let mut reachable = HashSet::from([source_id]);
+        let mut traversal = vec![source_id];
+        let mut cursor = 0;
+        while cursor < traversal.len() {
+            let current = traversal[cursor];
+            cursor += 1;
+            if let Some(targets) = outgoing.get(current) {
+                for target in targets {
+                    if reachable.insert(*target) {
+                        traversal.push(*target);
+                    }
+                }
+            }
+        }
+        if reachable.len() != self.nodes.len() {
+            return Err("Every workflow node must be reachable from Source".into());
+        }
         Ok(())
     }
 }
@@ -160,7 +184,13 @@ mod tests {
     #[test]
     fn validates_a_dag() {
         let workflow = WorkflowDocument {
-            nodes: vec![node("a"), WorkflowNode { category: "output".into(), ..node("b") }],
+            nodes: vec![
+                node("a"),
+                WorkflowNode {
+                    category: "output".into(),
+                    ..node("b")
+                },
+            ],
             edges: vec![edge("a-b", "a", "b")],
         };
         assert!(workflow.validate().is_ok());
@@ -171,12 +201,21 @@ mod tests {
         let workflow = WorkflowDocument {
             nodes: vec![
                 node("source"),
-                WorkflowNode { category: "output".into(), ..node("a") },
-                WorkflowNode { category: "output".into(), ..node("b") },
+                WorkflowNode {
+                    category: "output".into(),
+                    ..node("a")
+                },
+                WorkflowNode {
+                    category: "output".into(),
+                    ..node("b")
+                },
             ],
             edges: vec![edge("a-b", "a", "b"), edge("b-a", "b", "a")],
         };
-        assert_eq!(workflow.validate().unwrap_err(), "Workflow graph contains a cycle");
+        assert_eq!(
+            workflow.validate().unwrap_err(),
+            "Workflow graph contains a cycle"
+        );
     }
 
     #[test]
@@ -189,6 +228,66 @@ mod tests {
             .validate()
             .unwrap_err()
             .contains("references an unknown node"));
+    }
+
+    #[test]
+    fn rejects_missing_and_duplicate_sources() {
+        let missing = WorkflowDocument {
+            nodes: vec![WorkflowNode {
+                category: "output".into(),
+                ..node("result")
+            }],
+            edges: Vec::new(),
+        };
+        assert!(missing
+            .validate()
+            .unwrap_err()
+            .contains("exactly one source"));
+
+        let duplicate = WorkflowDocument {
+            nodes: vec![node("source-a"), node("source-b")],
+            edges: Vec::new(),
+        };
+        assert!(duplicate
+            .validate()
+            .unwrap_err()
+            .contains("exactly one source"));
+    }
+
+    #[test]
+    fn rejects_an_incoming_edge_to_source() {
+        let workflow = WorkflowDocument {
+            nodes: vec![
+                node("source"),
+                WorkflowNode {
+                    category: "output".into(),
+                    ..node("result")
+                },
+            ],
+            edges: vec![edge("result-source", "result", "source")],
+        };
+        assert_eq!(
+            workflow.validate().unwrap_err(),
+            "Source node cannot have incoming edges"
+        );
+    }
+
+    #[test]
+    fn rejects_nodes_disconnected_from_source() {
+        let workflow = WorkflowDocument {
+            nodes: vec![
+                node("source"),
+                WorkflowNode {
+                    category: "output".into(),
+                    ..node("result")
+                },
+            ],
+            edges: Vec::new(),
+        };
+        assert_eq!(
+            workflow.validate().unwrap_err(),
+            "Every workflow node must be reachable from Source"
+        );
     }
 }
 

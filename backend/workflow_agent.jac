@@ -77,6 +77,7 @@ walker WorkflowExecutorWalker {
     has reports: list[list[BlockView]] = [];
 
     can begin with Root entry {
+        print("[Swirl][Jac][Workflow] planning graph traversal");
         visit [-->[?:WorkflowBlock]];
     }
 
@@ -86,6 +87,9 @@ walker WorkflowExecutorWalker {
         }
         self.visited_ids.add(block.id);
         block.status = "running";
+        print(
+            f"[Swirl][Jac][Workflow] planned node '{block.title}' ({block.category})"
+        );
         self.ordered.append(
             BlockView(
                 id=block.id,
@@ -117,6 +121,10 @@ walker WorkflowExecutorWalker {
     }
 
     can execute_mcp with MCPToolBlock entry {
+        print(
+            f"[Swirl][Jac][MCP] server='{here.config.get('server', '')}' "
+            f"tool='{here.config.get('tool_name', '')}'"
+        );
         self.record(here);
     }
 
@@ -133,6 +141,9 @@ walker WorkflowExecutorWalker {
     }
 
     can finish with Root exit {
+        print(
+            f"[Swirl][Jac][Workflow] graph plan ready ({len(self.ordered)} nodes)"
+        );
         report self.ordered;
     }
 }
@@ -306,8 +317,8 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
                 "cron": "0 * * * *", "timezone": "America/Los_Angeles"
             }),
             _node("node-p2", "mcp_fetch", "MCP Web Scraper", "mcp", 440, 140, {
-                "server": "fetch-mcp-server", "tool_name": "fetch_url",
-                "params": {"url": ""}
+                "server": "fetch-mcp-server", "tool_name": "fetch",
+                "url": "https://example.com"
             }),
             _node("node-p3", "llm_summarize", "LLM Summarizer", "ai", 800, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
@@ -397,13 +408,38 @@ def plan_workflow(workflow: dict) -> list[dict] {
     if len(ordered_ids) != len(by_id) {
         raise ValueError("Workflow contains a cycle or unreachable node");
     }
+    views: list[dict] = [];
+    print("[Swirl][Jac][Workflow] preparing deterministic execution plan");
     for block_id in ordered_ids {
-        root ++> by_id[block_id];
+        block: WorkflowBlock = by_id[block_id];
+        block.status = "running";
+        if block.category == "mcp" {
+            print(
+                f"[Swirl][Jac][MCP] server='{block.config.get('server', '')}' "
+                f"tool='{block.config.get('tool_name', '')}'"
+            );
+        }
+        print(
+            f"[Swirl][Jac][Workflow] planned node '{block.title}' "
+            f"({block.category})"
+        );
+        views.append(
+            BlockView(
+                id=block.id,
+                block_type=block.block_type,
+                title=block.title,
+                category=block.category,
+                config=block.config,
+                status=block.status,
+                output=block.output,
+            ).to_dict()
+        );
     }
-
-    result = root spawn WorkflowExecutorWalker();
-    views: list[BlockView] = result.reports[0] if result.reports else [];
-    return [view.to_dict() for view in views];
+    print(
+        f"[Swirl][Jac][Workflow] deterministic plan ready "
+        f"({len(views)} nodes)"
+    );
+    return views;
 }
 
 

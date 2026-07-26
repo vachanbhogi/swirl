@@ -104,9 +104,7 @@ fn run_applescript_stdout(script: &str) -> Result<String, String> {
 
 fn mail_snapshot(mailbox: &str) -> Result<std::collections::HashSet<String>, String> {
     let target = mail_target(mailbox);
-    let script = format!(
-        "tell application \"Mail\" to get id of every message of {target}"
-    );
+    let script = format!("tell application \"Mail\" to get id of every message of {target}");
     let output = run_applescript_stdout(&script)?;
     Ok(output
         .split(',')
@@ -117,7 +115,10 @@ fn mail_snapshot(mailbox: &str) -> Result<std::collections::HashSet<String>, Str
 }
 
 fn mail_message_details(mailbox: &str, message_id: &str) -> Result<Value, String> {
-    if !message_id.chars().all(|character| character.is_ascii_digit()) {
+    if !message_id
+        .chars()
+        .all(|character| character.is_ascii_digit())
+    {
         return Err("Mail returned an invalid message identifier".into());
     }
     let target = mail_target(mailbox);
@@ -144,7 +145,6 @@ fn mail_target(mailbox: &str) -> String {
 
 fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
     let mailbox = string_param(params, "mailbox", "Inbox");
-    let filter = string_param(params, "filterSubject", "").to_ascii_lowercase();
     let interval = params
         .get("checkIntervalSec")
         .and_then(Value::as_u64)
@@ -158,11 +158,7 @@ fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
         Ok(ids) => ids,
         Err(error) => return MacActionResult::failure(error, risk),
     };
-    println!(
-        "[Swirl][Source] waiting for a new email in '{}' (filter: {})",
-        mailbox,
-        if filter.is_empty() { "none" } else { &filter }
-    );
+    println!("[Swirl][Source] waiting for any new email in '{}'", mailbox);
     let started = std::time::Instant::now();
     loop {
         std::thread::sleep(std::time::Duration::from_secs(interval));
@@ -179,15 +175,12 @@ fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
                 .get("subject")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if !filter.is_empty() && !subject.to_ascii_lowercase().contains(&filter) {
-                continue;
-            }
             println!("[Swirl][Source] new email received: {}", subject);
             return MacActionResult::success(details, risk);
         }
         if timeout > 0 && started.elapsed().as_secs() >= timeout {
             return MacActionResult::failure(
-                format!("Timed out waiting for a matching email after {timeout} seconds"),
+                format!("Timed out waiting for a new email after {timeout} seconds"),
                 risk,
             );
         }
@@ -292,13 +285,12 @@ pub fn execute(request: &MacActionRequest) -> MacActionResult {
                 "tell application \"Notes\"\n\
                  tell default account\n\
                  if not (exists folder \"{}\") then make new folder with properties {{name:\"{}\"}}\n\
-                 make new note at folder \"{}\" with properties {{name:\"{}\", body:\"<h1>{}</h1><p>{}</p>\"}}\n\
+                 make new note at folder \"{}\" with properties {{name:\"{}\", body:\"<div>{}</div>\"}}\n\
                  end tell\nend tell",
                 applescript_string(&folder),
                 applescript_string(&folder),
                 applescript_string(&folder),
                 applescript_string(&title),
-                applescript_string(&html_text(&title)),
                 applescript_string(&html_text(&content)),
             );
             run_applescript(&script, risk)

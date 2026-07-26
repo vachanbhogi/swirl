@@ -21,13 +21,13 @@ export const BLOCK_LIBRARY = [
     category: 'trigger',
     title: 'On Email Received',
     subtitle: 'Apple Mail / Webhook Event',
-    description: 'Triggers when a new high-priority email arrives',
+    description: 'Triggers when any new email arrives',
     jacNode: 'TriggerBlock',
     inputs: [],
     outputs: ['text', 'sender', 'subject'],
     config: {
       mailbox: 'Inbox',
-      filterSubject: 'Urgent',
+      filterSubject: '',
       checkIntervalSec: 15
     }
   },
@@ -222,7 +222,8 @@ export const BLOCK_LIBRARY = [
     outputs: ['markdownContent', 'httpStatus'],
     config: {
       server: 'fetch-mcp-server',
-      tool_name: 'fetch_url',
+      tool_name: 'fetch',
+      url: 'https://example.com',
       timeoutMs: 10000
     }
   },
@@ -236,9 +237,10 @@ export const BLOCK_LIBRARY = [
     inputs: ['path', 'content'],
     outputs: ['fileData', 'status'],
     config: {
-      server: '@modelcontextprotocol/server-filesystem',
-      tool_name: 'read_file',
-      allowedDir: '/Users/mac/Documents'
+      server: 'filesystem',
+      tool_name: 'read_text_file',
+      path: '$SWIRL_DOCUMENTS',
+      allowedDir: '$SWIRL_DOCUMENTS'
     }
   },
   {
@@ -253,6 +255,7 @@ export const BLOCK_LIBRARY = [
     config: {
       server: 'brave-search-mcp',
       tool_name: 'brave_web_search',
+      query: '',
       maxResults: 5
     }
   },
@@ -317,7 +320,7 @@ export const INITIAL_NODES = [
     x: 420,
     y: 120,
     config: {
-      prompt: 'Summarize email and extract urgent action items for Jac agent.',
+      prompt: 'Summarize this email and list any action items.',
       maxTokens: 300,
       temperature: 0.2
     },
@@ -334,7 +337,7 @@ export const INITIAL_NODES = [
       app: 'Notes',
       action: 'create_note',
       folder: 'Swirl Action Items',
-      defaultTitle: 'Urgent Mail Brief'
+      defaultTitle: 'Email Summary'
     },
     status: 'idle'
   },
@@ -432,7 +435,7 @@ export const WORKFLOW_PRESETS = [
         category: 'mcp',
         x: 420,
         y: 140,
-        config: { server: 'fetch-mcp-server', tool_name: 'fetch_url' },
+        config: { server: 'fetch-mcp-server', tool_name: 'fetch', url: 'https://example.com' },
         status: 'idle'
       },
       {
@@ -560,7 +563,7 @@ node MCPToolBlock :WorkflowBlock: {
     can execute(ctx: dict) -> dict {
         self.status = "running";
         server_name = self.config.get("server", "stdio-local");
-        tool_name = self.config.get("tool_name", "fetch_url");
+        tool_name = self.config.get("tool_name", "fetch");
         print(f"🔌 [MCPToolBlock] JSON-RPC Tool Call -> Server: {server_name}, Tool: {tool_name}");
         
         self.output = {"mcp_status": 200, "tool": tool_name, "result": "MCP Tool executed successfully"};

@@ -4,7 +4,7 @@ export const SOURCE_EVENTS = {
   trigger_email: {
     type: 'trigger_email',
     title: 'On Email Received',
-    description: 'Start when a matching message arrives in Apple Mail.',
+    description: 'Start when any new message arrives in Apple Mail.',
     config: { mailbox: 'Inbox', filterSubject: '', checkIntervalSec: 15, waitTimeoutSec: 0 }
   },
   trigger_cron: {
@@ -39,11 +39,15 @@ export const SOURCE_EVENTS = {
   }
 };
 
-export const sourceConfig = (eventType = 'trigger_email', config = {}) => ({
-  eventType: SOURCE_EVENTS[eventType] ? eventType : 'trigger_email',
-  ...SOURCE_EVENTS[eventType in SOURCE_EVENTS ? eventType : 'trigger_email'].config,
-  ...config
-});
+export const sourceConfig = (eventType = 'trigger_email', config = {}) => {
+  const normalizedEventType = SOURCE_EVENTS[eventType] ? eventType : 'trigger_email';
+  return {
+    eventType: normalizedEventType,
+    ...SOURCE_EVENTS[normalizedEventType].config,
+    ...config,
+    ...(normalizedEventType === 'trigger_email' ? { filterSubject: '' } : {})
+  };
+};
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 

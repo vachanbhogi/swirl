@@ -76,7 +76,10 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
               </select>
             )}
 
-            {Object.entries(config).filter(([key]) => !isSource || key !== 'eventType').map(([key, val]) => (
+            {Object.entries(config).filter(([key]) => (
+              !isSource ||
+              (key !== 'eventType' && !(config.eventType === 'trigger_email' && key === 'filterSubject'))
+            )).map(([key, val]) => (
               <div key={key}>
                 <label className="block text-[11px] font-mono text-neutral-400 mb-1">
                   {key}

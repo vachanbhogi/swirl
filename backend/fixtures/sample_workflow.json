@@ -1,11 +1,15 @@
 {
   "nodes": [
     {
-      "id": "node-1",
-      "type": "trigger_file",
-      "title": "On File Created",
-      "category": "trigger",
-      "config": {"watchPath": "~/Desktop"}
+      "id": "workflow-source",
+      "type": "source",
+      "title": "Source",
+      "category": "source",
+      "config": {
+        "eventType": "trigger_file",
+        "watchPath": "~/Desktop",
+        "filePattern": "*"
+      }
     },
     {
       "id": "node-2",
@@ -22,7 +26,7 @@
   "edges": [
     {
       "id": "edge-1-2",
-      "source": "node-1",
+      "source": "workflow-source",
       "target": "node-2",
       "sourcePort": "out",
       "targetPort": "in"

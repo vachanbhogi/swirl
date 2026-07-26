@@ -127,11 +127,11 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             category="trigger",
             title="On Email Received",
             subtitle="Apple Mail / Webhook Event",
-            description="Triggers when a new high-priority email arrives",
+            description="Triggers when any new email arrives",
             jac_node="TriggerBlock",
             inputs=[],
             outputs=["text", "sender", "subject"],
-            config={"mailbox": "Inbox", "filterSubject": "Urgent", "checkIntervalSec": 15}
+            config={"mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15}
         ),
         BlockDefinition(
             type="trigger_cron",
@@ -280,7 +280,7 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             jac_node="MCPToolBlock",
             inputs=["url"],
             outputs=["markdownContent", "httpStatus"],
-            config={"server": "fetch-mcp-server", "tool_name": "fetch_url", "timeoutMs": 10000}
+            config={"server": "fetch-mcp-server", "tool_name": "fetch", "url": "https://example.com", "timeoutMs": 10000}
         ),
         BlockDefinition(
             type="mcp_fs",
@@ -291,7 +291,7 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             jac_node="MCPToolBlock",
             inputs=["path", "content"],
             outputs=["fileData", "status"],
-            config={"server": "@modelcontextprotocol/server-filesystem", "tool_name": "read_file", "allowedDir": "/Users/mac/Documents"}
+            config={"server": "filesystem", "tool_name": "read_text_file", "path": "$SWIRL_DOCUMENTS", "allowedDir": "$SWIRL_DOCUMENTS"}
         ),
         BlockDefinition(
             type="mcp_search",
@@ -302,7 +302,7 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             jac_node="MCPToolBlock",
             inputs=["query"],
             outputs=["searchResults", "sources"],
-            config={"server": "brave-search-mcp", "tool_name": "brave_web_search", "maxResults": 5}
+            config={"server": "brave-search-mcp", "tool_name": "brave_web_search", "query": "", "maxResults": 5}
         ),
 
         # --- Logic Blocks ---
@@ -380,13 +380,13 @@ def default_starter_workflow() -> dict {
     return {
         "nodes": [
             {
-                "id": "node-1", 
-                "type": "trigger_email", 
-                "title": "On Email Received", 
-                "category": "trigger", 
+                "id": "workflow-source",
+                "type": "source",
+                "title": "Source",
+                "category": "source",
                 "x": 60, 
                 "y": 120, 
-                "config": {"mailbox": "Inbox", "filterSubject": "Urgent Action", "checkIntervalSec": 15}, 
+                "config": {"eventType": "trigger_email", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0},
                 "status": "idle"
             },
             {
@@ -396,7 +396,7 @@ def default_starter_workflow() -> dict {
                 "category": "ai", 
                 "x": 420, 
                 "y": 120, 
-                "config": {"prompt": "Summarize email and extract urgent action items for Jac agent.", "maxTokens": 300, "temperature": 0.2}, 
+                "config": {"prompt": "Summarize this email and list any action items.", "maxTokens": 300, "temperature": 0.2},
                 "status": "idle"
             },
             {
@@ -406,7 +406,7 @@ def default_starter_workflow() -> dict {
                 "category": "mac", 
                 "x": 780, 
                 "y": 60, 
-                "config": {"app": "Notes", "action": "create_note", "folder": "Swirl Action Items", "defaultTitle": "Urgent Mail Brief"}, 
+                "config": {"app": "Notes", "action": "create_note", "folder": "Swirl Action Items", "defaultTitle": "Email Summary"},
                 "status": "idle"
             },
             {
@@ -421,7 +421,7 @@ def default_starter_workflow() -> dict {
             }
         ],
         "edges": [
-            {"id": "edge-1-2", "source": "node-1", "target": "node-2", "sourcePort": "text", "targetPort": "text"},
+            {"id": "edge-1-2", "source": "workflow-source", "target": "node-2", "sourcePort": "event", "targetPort": "text"},
             {"id": "edge-2-3", "source": "node-2", "target": "node-3", "sourcePort": "summary", "targetPort": "text"},
             {"id": "edge-2-4", "source": "node-2", "target": "node-4", "sourcePort": "actionItems", "targetPort": "text"}
         ]
@@ -505,7 +505,7 @@ def workflow_presets() -> list[WorkflowPreset] {
                     "category": "mcp", 
                     "x": 420, 
                     "y": 140, 
-                    "config": {"server": "fetch-mcp-server", "tool_name": "fetch_url"}, 
+                    "config": {"server": "fetch-mcp-server", "tool_name": "fetch", "url": "https://example.com"},
                     "status": "idle"
                 },
                 {
