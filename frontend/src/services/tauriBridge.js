@@ -31,6 +31,10 @@ export async function generateJacSource(workflow) {
   return invokeBackend('generate_jac_source', { workflow });
 }
 
+export async function listBuiltinMcpServers() {
+  return invokeBackend('list_builtin_mcp_servers');
+}
+
 export async function getBackendHealth() {
   return invokeBackend('backend_health');
 }

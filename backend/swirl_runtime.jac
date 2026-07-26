@@ -14,7 +14,8 @@ import from backend.mcp_bridge {
     initialize_request, tools_list_request, tool_call_request,
     validate_transport, parse_tools_response, validate_tool_arguments,
     validate_server_name, notifications_initialized_request,
-    resources_list_request, prompts_list_request
+    resources_list_request, prompts_list_request,
+    builtin_mcp_servers, builtin_mcp_server
 }
 import from backend.models {
     WorkflowDocument, ExecutionEvent, ExecutionSummary
@@ -46,6 +47,7 @@ def read_payload(path: str) -> dict {
 
 
 def run_command(command: str, payload: dict) -> dict {
+    print(f"[Swirl][Jac] runtime command: {command}");
     # --- Prompt & Workflow Planning ---
     if command == "prompt" or command == "prompt-llm" {
         prompt: str = str(payload.get("prompt", ""));
@@ -122,6 +124,7 @@ def run_command(command: str, payload: dict) -> dict {
         return tools_list_request().to_dict();
     }
     if command == "mcp-call" {
+        print(f"[Swirl][Jac] MCP tool call: {payload.get('toolName', '')}");
         return tool_call_request(
             str(payload.get("toolName", "")),
             payload.get("arguments", {}) as dict,
@@ -152,6 +155,12 @@ def run_command(command: str, payload: dict) -> dict {
     }
     if command == "mcp-prompts-list" {
         return prompts_list_request().to_dict();
+    }
+    if command == "mcp-servers" {
+        return {"servers": builtin_mcp_servers()};
+    }
+    if command == "mcp-server-config" {
+        return builtin_mcp_server(str(payload.get("name", "")));
     }
 
     # --- Storage ---
@@ -219,4 +228,3 @@ with entry:__main__ {
         sys.exit(1);
     }
 }
-

@@ -93,6 +93,12 @@ pub fn invoke(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
     let output = output.map_err(|error| format!("Cannot launch Jac runtime: {error}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().filter(|line| !line.starts_with(SENTINEL)) {
+        println!("[Jac] {line}");
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        eprintln!("[Jac stderr] {line}");
+    }
     let envelope = stdout
         .lines()
         .rev()

@@ -5,7 +5,7 @@ export const SOURCE_EVENTS = {
     type: 'trigger_email',
     title: 'On Email Received',
     description: 'Start when a matching message arrives in Apple Mail.',
-    config: { mailbox: 'Inbox', filterSubject: 'High Priority', checkIntervalSec: 15 }
+    config: { mailbox: 'Inbox', filterSubject: '', checkIntervalSec: 15, waitTimeoutSec: 0 }
   },
   trigger_file: {
     type: 'trigger_file',
@@ -110,4 +110,3 @@ export function normalizeWorkflow(nodes = [], edges = []) {
 
   return { nodes: [source, ...retainedNodes.filter((node) => node.id !== SOURCE_ID)], edges: rewiredEdges };
 }
-

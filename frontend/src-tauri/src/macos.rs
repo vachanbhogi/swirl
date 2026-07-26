@@ -86,16 +86,111 @@ fn html_text(value: &str) -> String {
 }
 
 fn run_applescript(script: &str, risk: &str) -> MacActionResult {
+    match run_applescript_stdout(script) {
+        Ok(stdout) => MacActionResult::success(json!({ "stdout": stdout }), risk),
+        Err(error) => MacActionResult::failure(error, risk),
+    }
+}
+
+fn run_applescript_stdout(script: &str) -> Result<String, String> {
     match Command::new("osascript").arg("-e").arg(script).output() {
-        Ok(output) if output.status.success() => MacActionResult::success(
-            json!({ "stdout": String::from_utf8_lossy(&output.stdout).trim() }),
-            risk,
-        ),
-        Ok(output) => MacActionResult::failure(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            risk,
-        ),
-        Err(error) => MacActionResult::failure(error.to_string(), risk),
+        Ok(output) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        }
+        Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn mail_snapshot(mailbox: &str) -> Result<std::collections::HashSet<String>, String> {
+    let target = mail_target(mailbox);
+    let script = format!(
+        "tell application \"Mail\" to get id of every message of {target}"
+    );
+    let output = run_applescript_stdout(&script)?;
+    Ok(output
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+fn mail_message_details(mailbox: &str, message_id: &str) -> Result<Value, String> {
+    if !message_id.chars().all(|character| character.is_ascii_digit()) {
+        return Err("Mail returned an invalid message identifier".into());
+    }
+    let target = mail_target(mailbox);
+    let script = format!(
+        "tell application \"Mail\"\nset m to first message of {target} whose id is {message_id}\nset AppleScript's text item delimiters to \"|||SWIRL|||\"\nreturn (subject of m as text) & \"|||SWIRL|||\" & (content of m as text) & \"|||SWIRL|||\" & (sender of m as text)\nend tell"
+    );
+    let output = run_applescript_stdout(&script)?;
+    let mut parts = output.splitn(3, "|||SWIRL|||");
+    Ok(json!({
+        "subject": parts.next().unwrap_or_default(),
+        "content": parts.next().unwrap_or_default(),
+        "sender": parts.next().unwrap_or_default(),
+        "messageId": message_id
+    }))
+}
+
+fn mail_target(mailbox: &str) -> String {
+    if mailbox.trim().eq_ignore_ascii_case("inbox") {
+        "inbox".into()
+    } else {
+        format!("mailbox \"{}\"", applescript_string(mailbox))
+    }
+}
+
+fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
+    let mailbox = string_param(params, "mailbox", "Inbox");
+    let filter = string_param(params, "filterSubject", "").to_ascii_lowercase();
+    let interval = params
+        .get("checkIntervalSec")
+        .and_then(Value::as_u64)
+        .unwrap_or(15)
+        .clamp(1, 3600);
+    let timeout = params
+        .get("waitTimeoutSec")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let baseline = match mail_snapshot(&mailbox) {
+        Ok(ids) => ids,
+        Err(error) => return MacActionResult::failure(error, risk),
+    };
+    println!(
+        "[Swirl][Source] waiting for a new email in '{}' (filter: {})",
+        mailbox,
+        if filter.is_empty() { "none" } else { &filter }
+    );
+    let started = std::time::Instant::now();
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(interval));
+        let current = match mail_snapshot(&mailbox) {
+            Ok(ids) => ids,
+            Err(error) => return MacActionResult::failure(error, risk),
+        };
+        for id in current.difference(&baseline) {
+            let details = match mail_message_details(&mailbox, id) {
+                Ok(details) => details,
+                Err(_) => continue,
+            };
+            let subject = details
+                .get("subject")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if !filter.is_empty() && !subject.to_ascii_lowercase().contains(&filter) {
+                continue;
+            }
+            println!("[Swirl][Source] new email received: {}", subject);
+            return MacActionResult::success(details, risk);
+        }
+        if timeout > 0 && started.elapsed().as_secs() >= timeout {
+            return MacActionResult::failure(
+                format!("Timed out waiting for a matching email after {timeout} seconds"),
+                risk,
+            );
+        }
     }
 }
 
@@ -338,6 +433,7 @@ pub fn execute(request: &MacActionRequest) -> MacActionResult {
                 risk,
             )
         }
+        ("mail", "wait_for_new_message") => wait_for_new_email(&request.params, risk),
         ("calendar", "create_event") => {
             let title = string_param(&request.params, "title", "Swirl Event");
             let start = string_param(&request.params, "start", "");

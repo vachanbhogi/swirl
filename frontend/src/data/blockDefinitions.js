@@ -259,8 +259,9 @@ export const INITIAL_NODES = [
     config: {
       eventType: 'trigger_email',
       mailbox: 'Inbox',
-      filterSubject: 'Urgent Action',
-      checkIntervalSec: 15
+      filterSubject: '',
+      checkIntervalSec: 15,
+      waitTimeoutSec: 0
     },
     status: 'idle'
   },

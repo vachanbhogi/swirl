@@ -79,6 +79,14 @@ The old raw AppleScript command remains narrowly restricted for compatibility wi
 
 ## MCP commands
 
+Built-in MCP server definitions are owned by `backend/mcp_bridge.jac`. Tauri exposes
+the catalog through `list_builtin_mcp_servers`; Rust remains the native transport
+boundary for starting stdio processes and making HTTP requests.
+
+```js
+const builtIns = await invoke('list_builtin_mcp_servers');
+```
+
 ```js
 await invoke('register_mcp_server', {
   config: {
