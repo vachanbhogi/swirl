@@ -46,6 +46,50 @@ export const BLOCK_LIBRARY = [
     }
   },
   {
+    type: 'trigger_voice',
+    category: 'trigger',
+    title: 'Voice Command',
+    subtitle: 'Microphone / Whisper Trigger',
+    description: 'Triggers on custom spoken voice phrase',
+    jacNode: 'TriggerBlock',
+    inputs: [],
+    outputs: ['transcript', 'confidence'],
+    config: {
+      wakeWord: 'Hey Swirl',
+      language: 'en-US',
+      listenTimeoutSec: 10
+    }
+  },
+  {
+    type: 'trigger_webhook',
+    category: 'trigger',
+    title: 'HTTP Webhook',
+    subtitle: 'REST Endpoint Listener',
+    description: 'Triggers when an incoming HTTP POST request is received',
+    jacNode: 'TriggerBlock',
+    inputs: [],
+    outputs: ['payload', 'headers'],
+    config: {
+      path: '/api/v1/webhook',
+      method: 'POST',
+      authRequired: false
+    }
+  },
+  {
+    type: 'trigger_clipboard',
+    category: 'trigger',
+    title: 'Clipboard Listener',
+    subtitle: 'macOS Pasteboard Watcher',
+    description: 'Triggers when new text or image is copied to clipboard',
+    jacNode: 'TriggerBlock',
+    inputs: [],
+    outputs: ['clipboardText', 'contentType'],
+    config: {
+      watchText: true,
+      minChars: 5
+    }
+  },
+  {
     type: 'trigger_file',
     category: 'trigger',
     title: 'On File Created',
