@@ -18,6 +18,12 @@ frontend/src-tauri/target/
 src-tauri/target/
 target/
 
+# IDE & Tool Configs
+.cursor/
+.qoder/
+.gemini/
+.impeccable/
+
 # OS Files
 .DS_Store
 Thumbs.db
