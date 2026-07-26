@@ -1,97 +1,111 @@
-# STEP_BY_STEP_GUIDE.md — Hackathon Implementation & Submission Guide
+# QuaZe Build and Demo Guide
 
-**Event:** JacHacks SF 2026 @ Founders, Inc., San Francisco  
-**Project:** Swirl — AI Visual Scratch-Block Editor & macOS MCP Control Center  
-**Target Deadline:** 5:50 PM (Partial Checkpoint) / 7:15 PM (Final Hard Deadline)  
+QuaZe is a prompt-first agentic workflow builder for non-technical users. This
+guide exercises its first supported workflow—the seven-block meeting-prep
+proof—not arbitrary workflow generation.
 
----
+## 1. Install and Verify
 
-## Phase 1: Environment & Jac Core Setup (0-30 mins)
+```bash
+jac --version
+jac install
+jac check .
+jac test
+jac build --client web
+```
 
-1. **Install and verify the Jac CLI:**
-   ```bash
-   python3 -m pip install jaclang==0.34.7
-   jac --version
-   ```
-2. **Structure the Jac core (`/backend`):**
-   - Create `backend/workflow_agent.jac`: Core Jac nodes, walker graph executor, and LLM transform rules.
-   - Create `backend/mcp_bridge.jac`: MCP tool discovery and JSON-RPC execution walker.
-   - Create `backend/mac_control.jac`: AppleScript wrappers for macOS apps (Notes, Finder, Mail, System).
-   - Create `backend/code_generator.jac`: Visual graph to Jac source walker.
-   - Create `backend/swirl_runtime.jac`: Structured adapter invoked by the native process.
-3. **Use `frontend/src-tauri/src/` for the native boundary:**
-   - Typed Tauri commands and local events.
-   - Permission-gated AppleScript and filesystem operations.
-   - MCP stdio/HTTP process lifecycle.
-   - Tauri-managed workflow and trace persistence.
+The repository is pinned to Jac `0.34.7`.
 
----
+## 2. Run Safely in Fixture Mode
 
-## Phase 2: Building the Jac Engine Backend (30-90 mins)
+```bash
+jac start
+```
 
-1. **Implement `workflow_agent.jac`:**
-   - Define `WorkflowBlock` base node and concrete block classes (`TriggerBlock`, `LLMTransformBlock`, `MacAppBlock`, `MCPToolBlock`, `ConditionBlock`).
-   - Implement `WorkflowExecutorWalker` to step through graph nodes.
-   - Implement `PromptToWorkflowWalker` using `by llm()` to map text prompts to JSON block ASTs.
-2. **Implement the macOS policy walker and Rust executor (`mac_control.jac` / `src-tauri/src/macos.rs`):**
-   - Create AppleScript handlers for:
-     - **Apple Notes:** `osascript -e 'tell application "Notes" to make new note with properties {body:"..."}'`
-     - **Finder:** File list & directory operations.
-     - **System:** `osascript -e 'display notification "..." with title "Swirl Workflow"'`
-3. **Implement the MCP Bridge (`mcp_bridge.jac` / `src-tauri/src/mcp.rs`):**
-   - Connect stdio / HTTP MCP servers.
-   - Expose discovery and execution through typed Tauri commands.
+Fixture mode uses only repository data under `fixtures/`. Confirm the UI labels
+the compiler and connectors as deterministic/fixture-backed.
 
----
+Run the golden flow:
 
-## Phase 3: Building the Visual Scratch-Style UI Frontend (90-180 mins)
+1. Compile the default meeting-prep prompt.
+2. Confirm all seven blocks are present.
+3. Move Approval away from Save Brief and confirm validation fails.
+4. Restore the order and validate.
+5. Start the run.
+6. Confirm it pauses at Approval and no output file exists.
+7. Approve.
+8. Confirm the same run resumes and creates one `Tomorrow Brief.md`.
+9. Approve or retry again and confirm no duplicate artifact is created.
+10. Confirm both relevant notes are cited and the irrelevant note is absent.
 
-1. **Initialize Vite React Frontend (`/frontend`):**
-   ```bash
-   npm create vite@latest frontend -- --template react
-   cd frontend
-   npm install @xyflow/react lucide-react clsx tailwindcss postcss autoprefixer axios
-   ```
-2. **Design System & Aesthetics:**
-   - Implement modern dark/glassmorphic theme with colorful Scratch-style block nodes (Purple = Triggers, Amber = AI/LLM, Blue = macOS Apps, Emerald = MCP Tools, Red = Outputs).
-3. **Build Core Components:**
-   - `PromptBar.jsx`: Top natural language prompt input ("Prompt your workflow...").
-   - `ScratchCanvas.jsx`: Interactive visual node flow editor using React Flow.
-   - `BlockPalette.jsx`: Sidebar with drag-and-drop tool blocks (Apple Notes, Mail, Finder, MCP Tools, LLM Summarizer).
-   - `JacCodeViewer.jsx`: Split-screen panel displaying live generated `.jac` code side-by-side with visual blocks.
-   - `ExecutionInspector.jsx`: Bottom drawer with live log stream, node execution state, and output cards.
+## 3. Prepare Live Demo Sources
 
----
+Use only dedicated demo data.
 
-## Phase 4: Integration & Bi-Directional Compiler (180-240 mins)
+### Calendar
 
-1. **Prompt-to-Blocks Pipeline:**
-   - User types: *"Summarize my latest notes and save to Desktop file"* -> Tauri `compile_prompt` command -> Jac Walker generates AST -> React renders the visual block pipeline.
-2. **Live Jac Code Generation:**
-   - As blocks are added or edited on canvas, frontend calls Jac code generator to sync `.jac` source code view in real time.
-3. **Live Execution & Walker Visualizer:**
-   - User clicks **"▶ Run Workflow"** -> Tauri `execute_workflow` command -> Jac `WorkflowExecutorWalker` plans graph traversal -> `swirl-workflow-event` streams native events -> Active node glows green in UI.
+Create the dedicated calendar and synthetic meetings with the idempotent setup
+script:
 
----
+```bash
+osascript scripts/setup_demo_calendar.applescript
+```
 
-## Phase 5: Demo Scenarios & Submission Checklist (Final Hours)
+It creates only `QuaZe Demo`, `Apex design review`, and `Maya onboarding`.
+Do not point QuaZe at a personal calendar. Runtime Calendar access is read-only.
 
-### Demo Scenario 1: macOS Automation (Apple Notes & Finder)
-1. User prompts: *"Summarize text using LLM and create an Apple Note on my Mac"*.
-2. Swirl builds visual Scratch blocks.
-3. User views generated `.jac` source code.
-4. User clicks **Run**. Apple Notes opens on Mac with the newly generated note!
+### Obsidian
 
-### Demo Scenario 2: MCP Tool Integration
-1. Select MCP filesystem / web search tool block.
-2. Connect to LLM transform and Mac notification.
-3. Execute workflow and observe live walker traversal.
+Install Obsidian from its official distribution, then install the official
+filesystem MCP server:
 
-### Devpost Submission Checklist:
-- [x] **Project Name:** Swirl
-- [x] **Tagline:** AI Visual Scratch-Block Editor & macOS MCP Control Center Powered by Jaclang
-- [x] **GitHub Repository:** Include link and ensure >= 40% of codebase is `.jac` files.
-- [x] **GitHub Star Jac:** Star `https://github.com/jaseci-labs/jac`
-- [x] **Demo Video:** Record 2-minute walkthrough showing visual prompt-to-blocks, Jac code sync, and live Mac execution.
-- [x] **Track Selection:** Agentic AI, Best JacHammer, Best Use of Jaclang, Fintech/Open.
-- [x] **Partial Submission Checkpoint:** Submit before 5:50 PM!
+```bash
+npm install --global @modelcontextprotocol/server-filesystem
+```
+
+Open `fixtures/demo-vault` once as its own Obsidian vault. QuaZe starts the MCP
+server for each live read and passes that directory as its only allowed root.
+Do not expose a home directory or personal vault.
+
+### Hosted Prompt Compilation
+
+Hosted compilation is optional. Configure its model and credential only through
+environment variables supported by the runtime. Do not add credentials to
+`jac.toml`, source files, shell scripts, screenshots, or commits.
+
+## 4. Verify Live Evidence
+
+Select **Live demo**, repeat the golden flow, and confirm:
+
+- Calendar evidence names the dedicated calendar and bounded time range.
+- Vault evidence identifies the dedicated vault and MCP transport.
+- Approval creates a persisted event before Save Brief runs.
+- Resume uses the same run ID and does not repeat completed steps.
+- The saved path and content hash match the artifact shown in the UI.
+- Open Result opens the saved file in Obsidian.
+
+You can also run the connector-only opt-in checks:
+
+```bash
+jac run tests/live_calendar_opt_in.jac
+jac run tests/mcp_connector_opt_in.jac
+```
+
+Fixture success does not prove live Calendar, MCP, macOS permission, or Obsidian
+behavior.
+
+## 5. Demo Freeze
+
+Run the complete flow three consecutive times. Then:
+
+```bash
+jac check . --no-nowarn
+jac test -v
+jac build --client web
+python3 -m py_compile connector_host.py
+git diff --check
+git status --short
+```
+
+Record the full golden flow as a fallback video. Verify repository and
+submission links while logged out before claiming they are public.

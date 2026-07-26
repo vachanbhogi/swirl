@@ -1,11 +1,21 @@
-"""Swirl Jac runtime smoke-test entry point."""
+"""QuaZe prompt-to-agentic-workflow full-stack entry point."""
 
-import from backend.workflow_agent { PromptToWorkflowWalker }
+import from endpoints {
+    compile_prompt,
+    validate_workflow,
+    reorder_blocks,
+    start_run,
+    approve_run,
+    cancel_run,
+    recover_run,
+    retry_run,
+    get_run
+}
 
+cl {
+    import from .frontend { app as ClientApp }
 
-with entry {
-    result = root spawn PromptToWorkflowWalker(
-        user_prompt="Organize my Desktop files and create an Apple Note report"
-    );
-    print(result.reports[0].to_dict());
+    def:pub app -> JsxElement {
+        return <ClientApp/>;
+    }
 }

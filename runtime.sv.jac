@@ -1,66 +1,17 @@
-"""Pure workflow validation/reordering and connector-result execution helpers."""
+"""Pure workflow validation and reordering."""
 
 import from contracts {
+    BlockDefinitionSpec,
     BlockSpec,
     ConnectionSpec,
-    ConnectorResult,
     ValidationResult,
     WorkflowSpec
 }
-import from connectors {
-    BRIEF_FILENAME,
-    CalendarEvent,
-    VaultNote,
-    draft_brief,
-    events_from_result,
-    markdown_from_result,
-    notes_from_result,
-    open_saved_brief,
-    read_calendar,
-    save_brief,
-    search_vault,
-    source_references_from_result
+import from block_registry {
+    block_definition,
+    default_connector_names,
+    supported_block_types
 }
-
-
-glob SUPPORTED_BLOCK_TYPES: list[str] = [
-         "run_now",
-         "read_calendar",
-         "search_vault",
-         "draft_brief",
-         "approval",
-         "save_brief",
-         "open_result"
-     ];
-glob DEFAULT_CONNECTORS: list[str] = [
-         "calendar",
-         "vault",
-         "filesystem",
-         "obsidian"
-     ];
-
-
-obj RuntimeExecutionResult {
-    has success: bool = False,
-        state: str = "idle",
-        validation: ValidationResult = ValidationResult(),
-        meetings: list[CalendarEvent] = [],
-        notes: list[VaultNote] = [],
-        draft_markdown: str = "",
-        source_references: list[str] = [],
-        artifact_path: str = "",
-        artifact_hash: str = "",
-        artifact_created: bool = False,
-        save_called: bool = False,
-        evidence: list[str] = [],
-        error: str = "";
-}
-
-
-def default_connector_names -> list[str] {
-    return [name for name in DEFAULT_CONNECTORS];
-}
-
 
 def _add_error(errors: list[str], message: str) {
     if message not in errors {
@@ -79,42 +30,12 @@ def _config_string(block: BlockSpec, key: str) -> str {
 
 
 def _required_inputs(block_type: str) -> list[str] {
-    if block_type == "read_calendar" {
-        return ["run_request"];
-    }
-    if block_type == "search_vault" {
-        return ["meetings"];
-    }
-    if block_type == "draft_brief" {
-        return ["meetings", "matched_notes"];
-    }
-    if block_type == "approval" {
-        return ["brief_markdown"];
-    }
-    if block_type == "save_brief" {
-        return ["approved_brief"];
-    }
-    if block_type == "open_result" {
-        return ["artifact"];
-    }
-    return [];
-}
-
-
-def _required_connector(block_type: str) -> str {
-    if block_type == "read_calendar" {
-        return "calendar";
-    }
-    if block_type == "search_vault" {
-        return "vault";
-    }
-    if block_type == "save_brief" {
-        return "filesystem";
-    }
-    if block_type == "open_result" {
-        return "obsidian";
-    }
-    return "";
+    definition = block_definition(block_type);
+    return (
+        [port.name for port in definition.input_ports]
+            if definition is not None
+            else []
+    );
 }
 
 
@@ -142,17 +63,36 @@ def _validate_block_set(
     errors: list[str],
     warnings: list[str]
 ) {
-    if len(workflow.blocks) != len(SUPPORTED_BLOCK_TYPES) {
+    supported_types = supported_block_types();
+    if len(workflow.blocks) != len(supported_types) {
         _add_error(errors, "Workflow must contain exactly the seven golden blocks.");
     }
     type_counts: dict[str, int] = {};
-    for supported_type in SUPPORTED_BLOCK_TYPES {
+    for supported_type in supported_types {
         type_counts[supported_type] = 0;
     }
     for block in workflow.blocks {
-        if block.block_type not in SUPPORTED_BLOCK_TYPES {
+        if block.block_type not in supported_types {
             _add_error(errors, f"Unsupported block type: {block.block_type}.");
             continue;
+        }
+        candidate_definition = block_definition(block.block_type);
+        if candidate_definition is None {
+            _add_error(errors, f"Missing registry definition: {block.block_type}.");
+            continue;
+        }
+        definition: BlockDefinitionSpec = candidate_definition;
+        if block.block_version != definition.version {
+            _add_error(
+                errors,
+                f"Block {block.id} must use block version {definition.version}."
+            );
+        }
+        if block.config_version != definition.config_version {
+            _add_error(
+                errors,
+                f"Block {block.id} must use config version {definition.config_version}."
+            );
         }
         type_counts[block.block_type] = type_counts[block.block_type] + 1;
         for required_input in _required_inputs(block.block_type) {
@@ -166,41 +106,47 @@ def _validate_block_set(
                 );
             }
         }
-        connector_name = _required_connector(block.block_type);
-        if connector_name and connector_name not in available_connectors {
-            _add_error(
-                errors,
-                (
-                    f"Connector {connector_name} required by block "
+        for requirement in definition.connector_requirements {
+            if requirement.connector_id not in available_connectors {
+                message = (
+                    f"Connector {requirement.connector_id} required by block "
                     f"{block.id} is unavailable."
-                )
-            );
+                );
+                if requirement.required {
+                    _add_error(errors, message);
+                } elif message not in warnings {
+                    warnings.append(message);
+                }
+            }
         }
-
-        if block.block_type == "read_calendar" {
-            if _config_string(block, "calendar") != "QuaZe Demo" {
+        allowed_config_keys = [field.key for field in definition.config_schema];
+        for config_key in block.config {
+            if config_key not in allowed_config_keys {
                 _add_error(
-                    errors, "Read Calendar must target only the QuaZe Demo calendar."
+                    errors,
+                    f"Block {block.id} has undeclared config key {config_key}."
                 );
             }
-            if _config_string(block, "range") != "tomorrow" {
+        }
+        for field in definition.config_schema {
+            value = _config_string(block, field.key);
+            if field.required and not value {
                 _add_error(
-                    errors, "Read Calendar must use the bounded tomorrow range."
+                    errors, f"Block {block.id} requires config field {field.key}."
                 );
             }
-        } elif block.block_type == "search_vault" {
-            if _config_string(block, "vault") != "fixtures/demo-vault" {
+            if field.allowed_values and value not in field.allowed_values {
                 _add_error(
-                    errors, "Search Vault must target only fixtures/demo-vault."
+                    errors,
+                    (
+                        f"Block {block.id} config {field.key} must be one of "
+                        + ", ".join(field.allowed_values) + "."
+                    )
                 );
-            }
-        } elif block.block_type == "save_brief" {
-            if _config_string(block, "filename") != BRIEF_FILENAME {
-                _add_error(errors, f"Save Brief may write only {BRIEF_FILENAME}.");
             }
         }
     }
-    for supported_type in SUPPORTED_BLOCK_TYPES {
+    for supported_type in supported_types {
         count = type_counts[supported_type];
         if count == 0 {
             _add_error(
@@ -212,11 +158,6 @@ def _validate_block_set(
                 errors, f"Workflow contains duplicate block type: {supported_type}."
             );
         }
-    }
-    if "obsidian" not in available_connectors {
-        warnings.append(
-            "Obsidian is unavailable; the saved artifact cannot be opened."
-        );
     }
 }
 
@@ -240,6 +181,35 @@ def _valid_connections(
                 ("Connection target does not exist: " + connection.target_id + ".")
             );
             continue;
+        }
+        source_block = block_by_id[connection.source_id];
+        target_block = block_by_id[connection.target_id];
+        if connection.source_port not in source_block.outputs {
+            _add_error(
+                errors,
+                (
+                    f"Connection {connection.source_id}->{connection.target_id} "
+                    f"uses unknown source port {connection.source_port}."
+                )
+            );
+        }
+        if connection.target_port not in target_block.inputs {
+            _add_error(
+                errors,
+                (
+                    f"Connection {connection.source_id}->{connection.target_id} "
+                    f"uses unknown target port {connection.target_port}."
+                )
+            );
+        }
+        if connection.source_port != connection.target_port {
+            _add_error(
+                errors,
+                (
+                    f"Connection {connection.source_id}->{connection.target_id} "
+                    "has incompatible ports."
+                )
+            );
         }
         connection_key = connection.source_id + "->" + connection.target_id;
         if connection_key in seen_connections {
@@ -419,9 +389,13 @@ def _rebuilt_workflow(
 ) -> WorkflowSpec {
     connections: list[ConnectionSpec] = [];
     for position in range(len(blocks) - 1) {
+        source_port = blocks[position].outputs[0] if blocks[position].outputs else "";
         connections.append(
             ConnectionSpec(
-                source_id=blocks[position].id, target_id=blocks[position + 1].id
+                source_id=blocks[position].id,
+                target_id=blocks[position + 1].id,
+                source_port=source_port,
+                target_port=source_port
             )
         );
     }
@@ -431,7 +405,8 @@ def _rebuilt_workflow(
         version=workflow.version,
         blocks=blocks,
         connections=connections,
-        validation=ValidationResult()
+        validation=ValidationResult(),
+        compiler_provenance=workflow.compiler_provenance
     );
     candidate.validation = validate_workflow_spec(candidate, available_connectors);
     return candidate;
@@ -480,221 +455,4 @@ def reorder_workflow_spec(
         blocks[target_index] = moved;
     }
     return _rebuilt_workflow(workflow, blocks, connector_names);
-}
-
-
-def _failed_execution(
-    validation: ValidationResult,
-    meetings: list[CalendarEvent] | None = None,
-    notes: list[VaultNote] | None = None,
-    evidence: list[str] | None = None,
-    error: str = "",
-    save_called: bool = False
-) -> RuntimeExecutionResult {
-    return RuntimeExecutionResult(
-        success=False,
-        state="failed",
-        validation=validation,
-        meetings=[] if meetings is None else meetings,
-        notes=[] if notes is None else notes,
-        save_called=save_called,
-        evidence=[] if evidence is None else evidence,
-        error=error
-    );
-}
-
-
-def prepare_run(
-    workflow: WorkflowSpec,
-    calendar_result: ConnectorResult,
-    vault_result: ConnectorResult,
-    available_connectors: list[str] | None = None
-) -> RuntimeExecutionResult {
-    validation = validate_workflow_spec(workflow, available_connectors);
-    if not validation.valid {
-        return _failed_execution(
-            validation=validation,
-            error="Workflow validation failed before connector execution."
-        );
-    }
-    evidence: list[str] = [];
-    if calendar_result.evidence_summary {
-        evidence.append(calendar_result.evidence_summary);
-    }
-    if not calendar_result.success {
-        return _failed_execution(
-            validation=validation, evidence=evidence, error=calendar_result.error
-        );
-    }
-    meetings = events_from_result(calendar_result);
-    if not meetings {
-        return _failed_execution(
-            validation=validation,
-            evidence=evidence,
-            error="Calendar connector returned no usable events."
-        );
-    }
-    if vault_result.evidence_summary {
-        evidence.append(vault_result.evidence_summary);
-    }
-    if not vault_result.success {
-        return _failed_execution(
-            validation=validation,
-            meetings=meetings,
-            evidence=evidence,
-            error=vault_result.error
-        );
-    }
-    notes = notes_from_result(vault_result);
-    draft_result = draft_brief(meetings, notes);
-    if draft_result.evidence_summary {
-        evidence.append(draft_result.evidence_summary);
-    }
-    if not draft_result.success {
-        return _failed_execution(
-            validation=validation,
-            meetings=meetings,
-            notes=notes,
-            evidence=evidence,
-            error=draft_result.error
-        );
-    }
-    return RuntimeExecutionResult(
-        success=True,
-        state="awaiting_approval",
-        validation=validation,
-        meetings=meetings,
-        notes=notes,
-        draft_markdown=markdown_from_result(draft_result),
-        source_references=source_references_from_result(draft_result),
-        save_called=False,
-        evidence=evidence
-    );
-}
-
-
-def run_to_approval(
-    workflow: WorkflowSpec,
-    connector_mode: str = "fixture",
-    available_connectors: list[str] | None = None,
-    reference_date: str = "",
-    calendar_available: bool = True,
-    vault_available: bool = True
-) -> RuntimeExecutionResult {
-    validation = validate_workflow_spec(workflow, available_connectors);
-    if not validation.valid {
-        return _failed_execution(
-            validation=validation,
-            error="Workflow validation failed before connector execution."
-        );
-    }
-    calendar_result = read_calendar(
-        connector_mode=connector_mode,
-        reference_date=reference_date,
-        available=calendar_available
-    );
-    if not calendar_result.success {
-        return prepare_run(
-            workflow,
-            calendar_result,
-            ConnectorResult(
-                success=False,
-                evidence_summary="not called: Calendar failed first.",
-                error="Vault connector was not called."
-            ),
-            available_connectors
-        );
-    }
-    meetings = events_from_result(calendar_result);
-    vault_mode = "fixture" if connector_mode == "fixture" else "mcp";
-    vault_result = search_vault(
-        meetings=meetings,
-        connector_mode=vault_mode,
-        available=vault_available,
-        allow_fallback=True
-    );
-    return prepare_run(workflow, calendar_result, vault_result, available_connectors);
-}
-
-
-def _saved_string(saved: ConnectorResult, key: str) -> str {
-    value = saved.data.get(key);
-    if isinstance(value, str) {
-        return value;
-    }
-    return "";
-}
-
-
-def _saved_bool(saved: ConnectorResult, key: str) -> bool {
-    value = saved.data.get(key);
-    if isinstance(value, bool) {
-        return value;
-    }
-    return False;
-}
-
-
-def resume_approved_run(
-    prepared: RuntimeExecutionResult, approved: bool, launch_result: bool = False
-) -> RuntimeExecutionResult {
-    if not prepared.success
-    or prepared.state not in ["awaiting_approval", "succeeded"] {
-        return _failed_execution(
-            validation=prepared.validation,
-            meetings=prepared.meetings,
-            notes=prepared.notes,
-            evidence=[entry for entry in prepared.evidence],
-            error="Only a prepared run can be resumed."
-        );
-    }
-    if not approved {
-        return _failed_execution(
-            validation=prepared.validation,
-            meetings=prepared.meetings,
-            notes=prepared.notes,
-            evidence=[entry for entry in prepared.evidence],
-            error="Approval was rejected; Save Brief was not called."
-        );
-    }
-    evidence = [entry for entry in prepared.evidence];
-    saved = save_brief(prepared.draft_markdown, prepared.source_references);
-    if saved.evidence_summary {
-        evidence.append(saved.evidence_summary);
-    }
-    if not saved.success {
-        return _failed_execution(
-            validation=prepared.validation,
-            meetings=prepared.meetings,
-            notes=prepared.notes,
-            evidence=evidence,
-            error=saved.error,
-            save_called=True
-        );
-    }
-    if launch_result {
-        opened = open_saved_brief(launch_gui=True);
-        if opened.evidence_summary {
-            evidence.append(opened.evidence_summary);
-        }
-        if not opened.success {
-            evidence.append("Open Result error: " + opened.error);
-        }
-    } else {
-        evidence.append("unavailable: Obsidian launch was not requested for this run.");
-    }
-    return RuntimeExecutionResult(
-        success=True,
-        state="succeeded",
-        validation=prepared.validation,
-        meetings=prepared.meetings,
-        notes=prepared.notes,
-        draft_markdown=prepared.draft_markdown,
-        source_references=prepared.source_references,
-        artifact_path=_saved_string(saved, "path"),
-        artifact_hash=_saved_string(saved, "content_hash"),
-        artifact_created=_saved_bool(saved, "created"),
-        save_called=True,
-        evidence=evidence
-    );
 }

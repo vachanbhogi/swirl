@@ -36,9 +36,16 @@ textarea {
 
 button:focus-visible,
 a:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+summary:focus-visible,
+.review-scroll:focus-visible {
     outline: 3px solid rgba(35, 100, 170, 0.34);
     outline-offset: 3px;
+}
+
+.status-canceled,
+.step-canceled {
+    color: #52616B;
 }
 
 button {
@@ -817,6 +824,186 @@ dd {
     padding-left: 16px;
 }
 
+.artifact-grid > div,
+.exact-review > div,
+.receipt-columns > div,
+.details-body,
+.source-list {
+    min-width: 0;
+}
+
+.proof-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 18px;
+    margin-top: 18px;
+}
+
+.proof-panel {
+    min-width: 0;
+    padding: 24px;
+    border: 1px solid #CAD4DB;
+    background: #FBFCFC;
+}
+
+.proposal-panel,
+.receipt-panel {
+    margin-top: 18px;
+}
+
+.proof-layout .proposal-panel {
+    margin-top: 0;
+}
+
+.proof-state {
+    max-width: 220px;
+    padding: 5px 8px;
+    border: 1px solid #CAD4DB;
+    color: #52616B;
+    overflow-wrap: anywhere;
+    font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.effect-counts {
+    margin: 14px 0 0;
+    color: #17202A;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.proof-grid,
+.technical-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 18px;
+    margin: 18px 0;
+}
+
+.proof-grid > div,
+.technical-grid > div {
+    min-width: 0;
+}
+
+.proof-grid dt,
+.technical-grid dt {
+    color: #64727C;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.proof-grid dd,
+.technical-grid dd {
+    margin: 5px 0 0;
+    color: #17202A;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.technical-grid dd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+}
+
+.proof-panel details {
+    margin-top: 16px;
+    border-top: 1px solid #DCE3E7;
+    padding-top: 14px;
+}
+
+.proof-panel summary {
+    width: fit-content;
+    cursor: pointer;
+    color: #2364AA;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.details-body,
+.source-list {
+    margin-top: 14px;
+}
+
+.details-body h3,
+.source-list h3,
+.exact-review h3,
+.receipt-columns h3 {
+    margin: 14px 0 7px;
+    color: #52616B;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.details-body p,
+.details-body li,
+.source-list p,
+.source-list li,
+.receipt-columns p,
+.receipt-columns li,
+.receipt-note {
+    color: #52616B;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.details-body ul,
+.source-list ul,
+.receipt-columns ul {
+    margin: 0;
+    padding-left: 17px;
+}
+
+.blocker-list {
+    color: #8A4E11;
+}
+
+.review-block {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    border-left: 3px solid #B7791F;
+    background: #FFF8EA;
+    color: #74420E;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.exact-review {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+}
+
+.review-scroll {
+    width: 100%;
+    max-width: 100%;
+    height: 240px;
+    margin: 0;
+    padding: 12px;
+    overflow: auto;
+    border: 1px solid #CAD4DB;
+    background: #F5F7F8;
+    color: #17202A;
+    font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+}
+
+.receipt-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    margin-top: 12px;
+}
+
+.receipt-note {
+    margin: 8px 0 0;
+}
+
 .product-footer {
     display: flex;
     align-items: center;
@@ -919,7 +1106,10 @@ dd {
     .workflow-layout,
     .run-dock,
     .validation-panel,
-    .artifact-grid {
+    .artifact-grid,
+    .proof-layout,
+    .exact-review,
+    .receipt-columns {
         grid-template-columns: 1fr;
     }
 
@@ -1012,8 +1202,14 @@ dd {
     }
 
     .library-list,
-    .inspector-list {
+    .inspector-list,
+    .proof-grid,
+    .technical-grid {
         grid-template-columns: 1fr;
+    }
+
+    .proof-panel {
+        padding: 18px 14px;
     }
 
     .spine-heading {

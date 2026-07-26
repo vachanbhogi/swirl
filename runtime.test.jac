@@ -147,36 +147,6 @@ test "boundary reorder is idempotent" {
 }
 
 
-test "connector failure stops before artifact" {
-    failed_calendar = ConnectorResult(
-        success=False,
-        evidence_summary="fixture: injected Calendar failure.",
-        error="Calendar fixture failed."
-    );
-    result = prepare_run(
-        golden_workflow_spec(), failed_calendar, ConnectorResult(success=True)
-    );
-    assert not result.success;
-    assert result.state == "failed";
-    assert not result.save_called;
-    assert result.artifact_path == "";
-    assert result.artifact_hash == "";
-}
-
-
-test "pre approval produces draft without save" {
-    calendar_result = _fixture_calendar();
-    vault_result = _fixture_vault(calendar_result);
-    prepared = prepare_run(golden_workflow_spec(), calendar_result, vault_result);
-    assert prepared.success , prepared.error;
-    assert prepared.state == "awaiting_approval";
-    assert prepared.draft_markdown.startswith("# Tomorrow Brief");
-    assert not prepared.save_called;
-    assert prepared.artifact_path == "";
-    assert prepared.artifact_hash == "";
-}
-
-
 test "fixture search includes Apex and Maya notes" {
     calendar_result = _fixture_calendar();
     search_result = _fixture_vault(calendar_result);

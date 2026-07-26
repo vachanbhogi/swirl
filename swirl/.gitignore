@@ -1,0 +1,29 @@
+# Python & Virtual Environments
+.venv/
+__pycache__/
+*.pyc
+
+# Jac Database & Caches
+.jac/
+*.db
+jac.local.toml
+
+# Node & Frontend Build Outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Rust & Tauri Build Outputs
+frontend/src-tauri/target/
+src-tauri/target/
+target/
+
+# IDE & Tool Configs
+.cursor/
+.qoder/
+.gemini/
+.impeccable/
+
+# OS Files
+.DS_Store
+Thumbs.db

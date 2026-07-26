@@ -420,11 +420,6 @@ def search_vault(
     fallback = _direct_vault_search(
         meetings, "fallback direct-filesystem after MCP unavailable"
     );
-    if fallback.success {
-        fallback.evidence_summary = (
-            fallback.evidence_summary + " MCP error: " + mcp_result.error
-        );
-    }
     return fallback;
 }
 
@@ -547,9 +542,39 @@ def resolve_demo_vault_path(
     );
 }
 
+def inspect_brief_target -> ConnectorResult {
+    inspected = connector_host.inspect_vault_artifact(BRIEF_FILENAME);
+    if not _bool_value(inspected, "success") {
+        return ConnectorResult(
+            success=False,
+            evidence_summary="target inspection rejected before write.",
+            error=_string_value(inspected, "error"),
+            connector_id="filesystem",
+            mode="local",
+            status="unavailable",
+            error_code=_string_value(inspected, "error_code")
+        );
+    }
+    data: dict[str, object] = {};
+    data["exists"] = _bool_value(inspected, "exists");
+    data["content"] = _string_value(inspected, "content");
+    data["content_hash"] = _string_value(inspected, "content_hash");
+    return ConnectorResult(
+        success=True,
+        data=data,
+        evidence_summary="target inspection completed without writing.",
+        connector_id="filesystem",
+        mode="local",
+        status="ready"
+    );
+}
+
 
 def save_brief(
-    markdown: str, source_references: list[str], relative_path: str = BRIEF_FILENAME
+    markdown: str,
+    source_references: list[str],
+    relative_path: str = BRIEF_FILENAME,
+    expected_prior_hash: str = ""
 ) -> ConnectorResult {
     if not markdown.strip() {
         return ConnectorResult(
@@ -558,26 +583,36 @@ def save_brief(
             error="A non-empty approved brief is required before saving."
         );
     }
-    saved = connector_host.save_vault_artifact(relative_path, markdown);
+    saved = connector_host.save_vault_artifact(
+        relative_path, markdown, expected_prior_hash
+    );
     if not _bool_value(saved, "success") {
         return ConnectorResult(
             success=False,
             evidence_summary="save rejected: no artifact was accepted.",
-            error=_string_value(saved, "error")
+            error=_string_value(saved, "error"),
+            connector_id="filesystem",
+            mode="local",
+            status="unavailable",
+            error_code=_string_value(saved, "error_code")
         );
     }
     data: dict[str, object] = {};
     data["path"] = _string_value(saved, "path");
     data["content_hash"] = _string_value(saved, "content_hash");
     data["created"] = _bool_value(saved, "created");
+    data["write_state"] = _string_value(saved, "write_state");
     data["source_references"] = source_references;
-    action = "created atomically" if _bool_value(saved, "created") else "reused";
+    action = _string_value(saved, "write_state");
     return ConnectorResult(
         success=True,
         data=data,
         evidence_summary=(
-            f"artifact: {action} the idempotent {BRIEF_FILENAME} content hash."
-        )
+            f"artifact: {action} for the bounded {BRIEF_FILENAME} content hash."
+        ),
+        connector_id="filesystem",
+        mode="local",
+        status="ready"
     );
 }
 

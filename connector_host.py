@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import selectors
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import date, datetime, time, timedelta
@@ -34,8 +35,19 @@ class MCPProtocolError(RuntimeError):
     """Raised when the local filesystem MCP process violates expectations."""
 
 
+class UnsafeArtifactTargetError(OSError):
+    """Raised when the bounded write target cannot be opened safely."""
+
+
 def _demo_vault_root() -> Path:
-    root = (Path(__file__).resolve().parent / "fixtures" / "demo-vault").resolve()
+    module_root = Path(__file__).resolve().parent
+    fixtures_root = module_root / "fixtures"
+    vault_path = fixtures_root / "demo-vault"
+    if fixtures_root.is_symlink() or vault_path.is_symlink():
+        raise OSError(
+            "The dedicated demo vault path must not contain symbolic links."
+        )
+    root = vault_path.resolve()
     if not root.is_dir():
         raise FileNotFoundError(
             "The dedicated demo vault is missing. Restore fixtures/demo-vault."
@@ -627,8 +639,78 @@ def mcp_vault_notes() -> Dict[str, object]:
                     process.wait(timeout=2)
 
 
-def save_vault_artifact(relative_path: str, content: str) -> Dict[str, object]:
-    """Atomically write the one supported artifact and return its SHA-256."""
+def _write_target_path(relative_path: str) -> Path:
+    if relative_path != _GENERATED_BRIEF:
+        raise ValueError(
+            "QuaZe may access only fixtures/demo-vault/Tomorrow Brief.md."
+        )
+    return _demo_vault_root() / _GENERATED_BRIEF
+
+
+def _read_regular_file_nofollow(path: Path) -> bytes:
+    if path.is_symlink():
+        raise UnsafeArtifactTargetError(
+            "Tomorrow Brief.md must not be a symbolic link."
+        )
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise UnsafeArtifactTargetError(
+            "Tomorrow Brief.md could not be opened without following links."
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise UnsafeArtifactTargetError(
+                "Tomorrow Brief.md exists but is not a regular file."
+            )
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            return handle.read()
+    finally:
+        os.close(descriptor)
+
+
+def inspect_vault_artifact(relative_path: str = _GENERATED_BRIEF) -> Dict[str, object]:
+    """Read the bounded write target without following a final symlink."""
+
+    try:
+        target = _write_target_path(relative_path)
+        if not os.path.lexists(target):
+            return {
+                "success": True,
+                "exists": False,
+                "content": "",
+                "content_hash": "absent",
+                "error": "",
+                "error_code": "",
+            }
+        content = _read_regular_file_nofollow(target)
+        return {
+            "success": True,
+            "exists": True,
+            "content": content.decode("utf-8"),
+            "content_hash": hashlib.sha256(content).hexdigest(),
+            "error": "",
+            "error_code": "",
+        }
+    except (OSError, UnicodeError, ValueError) as exc:
+        return {
+            "success": False,
+            "exists": False,
+            "content": "",
+            "content_hash": "",
+            "error": str(exc),
+            "error_code": "unsafe_target",
+        }
+
+
+def save_vault_artifact(
+    relative_path: str,
+    content: str,
+    expected_prior_hash: str = "",
+) -> Dict[str, object]:
+    """Write one bounded artifact after checking the approved prior hash."""
 
     if relative_path != _GENERATED_BRIEF:
         return {
@@ -636,25 +718,41 @@ def save_vault_artifact(relative_path: str, content: str) -> Dict[str, object]:
             "path": "",
             "content_hash": "",
             "created": False,
+            "write_state": "",
             "error": "QuaZe may save only fixtures/demo-vault/Tomorrow Brief.md.",
+            "error_code": "invalid_target",
         }
 
     try:
-        target = _resolve_demo_vault_path(relative_path, must_exist=False)
+        target = _write_target_path(relative_path)
         encoded = content.encode("utf-8")
         content_hash = hashlib.sha256(encoded).hexdigest()
-        if target.exists():
-            if not target.is_file():
-                raise OSError("Tomorrow Brief.md exists but is not a regular file.")
-            existing_hash = hashlib.sha256(target.read_bytes()).hexdigest()
-            if existing_hash == content_hash:
-                return {
-                    "success": True,
-                    "path": str(target),
-                    "content_hash": content_hash,
-                    "created": False,
-                    "error": "",
-                }
+        target_existed = os.path.lexists(target)
+        existing_hash = (
+            hashlib.sha256(_read_regular_file_nofollow(target)).hexdigest()
+            if target_existed
+            else "absent"
+        )
+        if not expected_prior_hash or existing_hash != expected_prior_hash:
+            return {
+                "success": False,
+                "path": "",
+                "content_hash": "",
+                "created": False,
+                "write_state": "",
+                "error": "The write target changed after review.",
+                "error_code": "target_changed",
+            }
+        if existing_hash == content_hash:
+            return {
+                "success": True,
+                "path": "fixtures/demo-vault/Tomorrow Brief.md",
+                "content_hash": content_hash,
+                "created": False,
+                "write_state": "no_change",
+                "error": "",
+                "error_code": "",
+            }
 
         temporary_path = ""
         try:
@@ -669,6 +767,21 @@ def save_vault_artifact(relative_path: str, content: str) -> Dict[str, object]:
                 temporary.write(encoded)
                 temporary.flush()
                 os.fsync(temporary.fileno())
+            current_hash = (
+                hashlib.sha256(_read_regular_file_nofollow(target)).hexdigest()
+                if os.path.lexists(target)
+                else "absent"
+            )
+            if current_hash != expected_prior_hash:
+                return {
+                    "success": False,
+                    "path": "",
+                    "content_hash": "",
+                    "created": False,
+                    "write_state": "",
+                    "error": "The write target changed after review.",
+                    "error_code": "target_changed",
+                }
             os.replace(temporary_path, target)
             temporary_path = ""
         finally:
@@ -677,10 +790,22 @@ def save_vault_artifact(relative_path: str, content: str) -> Dict[str, object]:
 
         return {
             "success": True,
-            "path": str(target),
+            "path": "fixtures/demo-vault/Tomorrow Brief.md",
             "content_hash": content_hash,
-            "created": True,
+            "created": not target_existed,
+            "write_state": "update" if target_existed else "create",
             "error": "",
+            "error_code": "",
+        }
+    except UnsafeArtifactTargetError as exc:
+        return {
+            "success": False,
+            "path": "",
+            "content_hash": "",
+            "created": False,
+            "write_state": "",
+            "error_code": "unsafe_target",
+            "error": str(exc),
         }
     except (OSError, ValueError) as exc:
         return {
@@ -688,9 +813,11 @@ def save_vault_artifact(relative_path: str, content: str) -> Dict[str, object]:
             "path": "",
             "content_hash": "",
             "created": False,
+            "write_state": "",
+            "error_code": "write_failed",
             "error": (
-                "Tomorrow Brief.md could not be saved atomically inside the "
-                "dedicated demo vault: " + str(exc)
+                "Tomorrow Brief.md could not be saved inside the dedicated "
+                "demo vault: " + str(exc)
             ),
         }
 

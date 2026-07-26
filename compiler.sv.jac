@@ -3,8 +3,8 @@
 import os;
 import httpx;
 import from jaclang.byllm.lib { ByLLMError }
-import from contracts { DemoState }
-import from workflow { golden_workflow_spec, initial_demo_state }
+import from contracts { CompilerProvenanceSpec, DemoState }
+import from workflow { initial_demo_state }
 
 enum AllowedBlockType {
     RUN_NOW = "run_now",
@@ -82,11 +82,40 @@ def _prompt_matches_golden_intent(user_prompt: str) -> bool {
     );
 }
 
-def _fallback_state(notice: str) -> DemoState {
-    return initial_demo_state(
-        compiler_mode="deterministic_fallback", compiler_notice=notice
+def _provenance(
+    mode: str,
+    compiler_id: str,
+    fallback_reason: str = "",
+    outbound_data: list[str] | None = None
+) -> CompilerProvenanceSpec {
+    return CompilerProvenanceSpec(
+        mode=mode,
+        compiler_id=compiler_id,
+        compiler_version="2",
+        fallback_reason=fallback_reason,
+        outbound_data=outbound_data if outbound_data is not None else []
     );
 }
+
+
+def _fallback_state(
+    notice: str,
+    fallback_reason: str,
+    outbound_data: list[str] | None = None
+) -> DemoState {
+    provenance = _provenance(
+        "deterministic_fallback",
+        "quaze.golden-workflow",
+        fallback_reason,
+        outbound_data
+    );
+    return initial_demo_state(
+        compiler_mode=provenance.mode,
+        compiler_notice=notice,
+        compiler_provenance=provenance
+    );
+}
+
 
 def compile_prompt_for_mode(user_prompt: str, hosted_enabled: bool) -> DemoState {
     if not hosted_enabled {
@@ -94,22 +123,26 @@ def compile_prompt_for_mode(user_prompt: str, hosted_enabled: bool) -> DemoState
             return _fallback_state(
                 "The prompt requested an unsupported or empty workflow. "
                 "QuaZe loaded its supported meeting-prep workflow in labeled "
-                "deterministic fallback mode."
+                "deterministic fallback mode.",
+                "unsupported_intent"
             );
         }
+        provenance = _provenance("deterministic", "quaze.golden-workflow");
         return initial_demo_state(
-            compiler_mode="deterministic",
+            compiler_mode=provenance.mode,
             compiler_notice=(
                 "The supported meeting-prep workflow was loaded in "
                 "deterministic mode. Hosted compilation is disabled."
-            )
+            ),
+            compiler_provenance=provenance
         );
     }
 
     if not user_prompt.strip() {
         return _fallback_state(
             "The prompt was empty. QuaZe loaded its supported "
-            "meeting-prep workflow in deterministic fallback mode."
+            "meeting-prep workflow in deterministic fallback mode.",
+            "empty_prompt"
         );
     }
 
@@ -119,24 +152,37 @@ def compile_prompt_for_mode(user_prompt: str, hosted_enabled: bool) -> DemoState
             return _fallback_state(
                 "Hosted output did not match QuaZe's seven-block "
                 "allowlist. The supported meeting-prep workflow was loaded "
-                "in deterministic fallback mode."
+                "in deterministic fallback mode.",
+                "hosted_output_rejected",
+                ["Prompt text was sent to the configured hosted compiler."]
             );
         }
-        workflow = golden_workflow_spec();
-        return DemoState(
-            workflow=workflow,
-            validation=workflow.validation,
-            compiler_mode="hosted",
+        provenance = _provenance(
+            "hosted",
+            "jac.byllm",
+            outbound_data=[
+                "Prompt text was sent to the configured hosted compiler."
+            ]
+        );
+        state = initial_demo_state(
+            compiler_mode=provenance.mode,
             compiler_notice=(
                 "The prompt was compiled into QuaZe's currently supported "
                 "seven-block meeting-prep workflow."
-            )
+            ),
+            compiler_provenance=provenance
         );
+        state.run_contract.outbound_data = [
+            entry for entry in provenance.outbound_data
+        ];
+        return state;
     } except (ByLLMError, ConnectionError, TimeoutError, OSError, httpx.HTTPError) {
         return _fallback_state(
             "Hosted compilation was unavailable. QuaZe loaded its "
             "supported meeting-prep workflow in deterministic fallback "
-            "mode."
+            "mode.",
+            "hosted_unavailable",
+            ["Prompt text may have been sent to the configured hosted compiler."]
         );
     }
 }

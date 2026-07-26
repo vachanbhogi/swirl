@@ -14,6 +14,7 @@ sv import from endpoints {
     approve_run,
     compile_prompt,
     get_run,
+    recover_run,
     reorder_blocks,
     start_run,
     validate_workflow
@@ -33,6 +34,9 @@ def run_state_label(state: RunState) -> str {
     if value == "failed" {
         return "failed";
     }
+    if value == "canceled" {
+        return "canceled";
+    }
     return "idle";
 }
 
@@ -49,6 +53,9 @@ def run_state_class(state: RunState) -> str {
     }
     if value == "failed" {
         return "status-failed";
+    }
+    if value == "canceled" {
+        return "status-canceled";
     }
     return "status-idle";
 }
@@ -70,6 +77,9 @@ def step_state_label(state: StepState | None) -> str {
     if value == "failed" {
         return "failed";
     }
+    if value == "canceled" {
+        return "canceled";
+    }
     return "pending";
 }
 
@@ -89,6 +99,9 @@ def step_state_class(state: StepState | None) -> str {
     }
     if value == "failed" {
         return "step-failed";
+    }
+    if value == "canceled" {
+        return "step-canceled";
     }
     return "step-pending";
 }
@@ -397,8 +410,168 @@ def ValidationPanel(demo: DemoState) -> JsxElement {
         </section>;
 }
 
+def RunContractPanel(demo: DemoState) -> JsxElement {
+    contract = demo.run_contract;
+    return
+        <section className="proof-panel contract-panel" aria-labelledby="contract-title">
+            <div className="section-heading">
+                <div>
+                    <p className="eyebrow">Preview-to-Proof preflight</p>
+                    <h2 id="contract-title">Experimental run boundary</h2>
+                </div>
+                <span className="proof-state">{contract.state}</span>
+            </div>
+            <p className="effect-counts">
+                Reads {str(contract.read_count)} · Transforms {str(contract.transform_count)}
+                {" · "}Approvals {str(contract.approval_count)} · Writes {str(contract.write_count)}
+                {" · "}Opens {str(contract.open_count)} · Sends {str(contract.send_count)}
+                {" · "}Deletes {str(contract.delete_count)} · Purchases {str(contract.purchase_count)}
+            </p>
+            <dl className="proof-grid">
+                <div>
+                    <dt>Enforcement</dt>
+                    <dd>{contract.enforcement_level}</dd>
+                </div>
+                <div>
+                    <dt>Connector profile</dt>
+                    <dd>{contract.connector_mode}</dd>
+                </div>
+                <div>
+                    <dt>Maximum affected</dt>
+                    <dd>{str(contract.maximum_affected_items)}</dd>
+                </div>
+                <div>
+                    <dt>Required approvals</dt>
+                    <dd>{", ".join(contract.required_approvals)
+                        if contract.required_approvals
+                        else "None"}</dd>
+                </div>
+            </dl>
+            <div className="visible-blockers" role="note">
+                <h3>Experimental blockers</h3>
+                <ul className="blocker-list">
+                    {[
+                        <li key={blocker}>{blocker}</li>
+                        for blocker in contract.blockers
+                    ]}
+                </ul>
+            </div>
+            <details>
+                <summary>Scopes and outbound data</summary>
+                <div className="details-body">
+                    <h3>Resource scopes</h3>
+                    <ul>
+                        {[
+                            <li key={scope.connector_id + scope.permission}>
+                                <strong>{scope.connector_id}</strong>
+                                {" · " + scope.access + " · " + scope.mode + " · " + scope.target}
+                            </li> for scope in contract.resource_scopes
+                        ]}
+                    </ul>
+                    <h3>Outbound data</h3>
+                    {contract.outbound_data
+                    and <ul>{[
+                        <li key={entry}>{entry}</li> for entry in contract.outbound_data
+                    ]}</ul>
+                    or <p>None in deterministic fixture execution.</p>}
+                </div>
+            </details>
+        </section>;
+}
+
+def EffectProposalPanel(demo: DemoState) -> JsxElement {
+    proposal = demo.effect_proposal;
+    return
+        <section className="proof-panel proposal-panel" aria-labelledby="proposal-title">
+            <div className="section-heading">
+                <div>
+                    <p className="eyebrow">Exact effect proposal</p>
+                    <h2 id="proposal-title">
+                        {proposal.change_kind.replace("_", " ")
+                            if proposal.change_kind != ""
+                            else "Not prepared"}
+                    </h2>
+                </div>
+                <span className="proof-state">{proposal.state}</span>
+            </div>
+            <dl className="proof-grid">
+                <div>
+                    <dt>Target</dt>
+                    <dd>{proposal.target if proposal.target != "" else "Not prepared"}</dd>
+                </div>
+                <div>
+                    <dt>Visibility</dt>
+                    <dd>{proposal.content_visibility.replace("_", " ")}</dd>
+                </div>
+                <div>
+                    <dt>Sources</dt>
+                    <dd>{str(len(proposal.source_references))}</dd>
+                </div>
+                <div>
+                    <dt>Remaining effects</dt>
+                    <dd>{", ".join(proposal.remaining_effects)
+                        if proposal.remaining_effects
+                        else "None"}</dd>
+                </div>
+            </dl>
+            {demo.approval.stale_reason != ""
+            and <p className="review-block" role="status">{demo.approval.stale_reason}</p>
+            or None}
+            {proposal.blockers
+            and <ul className="blocker-list review-block">
+                {[<li key={blocker}>{blocker}</li> for blocker in proposal.blockers]}
+            </ul>
+            or None}
+            <div className="exact-review">
+                <div>
+                    <h3>Full proposed content</h3>
+                    <pre
+                        className="review-scroll"
+                        tabIndex={0}
+                    >{proposal.proposed_content_excerpt
+                        if proposal.proposed_content_excerpt != ""
+                        else "Exact content is unavailable."}</pre>
+                </div>
+                <div>
+                    <h3>Full proposed diff</h3>
+                    <pre
+                        className="review-scroll"
+                        tabIndex={0}
+                    >{proposal.diff_excerpt
+                        if proposal.diff_excerpt != ""
+                        else "Exact diff is unavailable."}</pre>
+                </div>
+            </div>
+            <div className="source-list">
+                <h3>Sources</h3>
+                {proposal.source_references
+                and <ul>{[
+                    <li key={source}><code>{source}</code></li>
+                    for source in proposal.source_references
+                ]}</ul>
+                or <p>No public source references are available.</p>}
+            </div>
+            <details>
+                <summary>Technical digest details</summary>
+                <dl className="technical-grid">
+                    <div><dt>Effect digest</dt><dd>{proposal.effect_digest}</dd></div>
+                    <div><dt>Approval nonce</dt><dd>{proposal.approval_nonce}</dd></div>
+                    <div><dt>Source hash</dt><dd>{proposal.source_references_hash}</dd></div>
+                    <div><dt>Prior hash</dt><dd>{proposal.prior_target_hash}</dd></div>
+                    <div><dt>Proposed hash</dt><dd>{proposal.proposed_payload_hash}</dd></div>
+                </dl>
+            </details>
+        </section>;
+}
+
 def ApprovalPanel(
-    demo: DemoState, busy: bool, on_decide: Callable[[bool], None]
+    demo: DemoState,
+    busy: bool,
+    uncertain: bool,
+    can_approve: bool,
+    can_reject: bool,
+    on_decide: Callable[[bool], None],
+    on_refresh: Callable[[], None]
 ) -> JsxElement {
     return
         <section className="approval-panel" aria-labelledby="approval-title">
@@ -410,12 +583,27 @@ def ApprovalPanel(
                         if demo.approval.prompt != ""
                         else "Approve the drafted meeting brief before Save Brief runs."}
                 </p>
+                {uncertain
+                and <p className="review-block" role="alert">
+                    Decision delivery is uncertain. Refresh persisted state before deciding again.
+                </p>
+                or None}
             </div>
             <div className="approval-actions">
+                {uncertain
+                and <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={busy}
+                    onClick={on_refresh}
+                >
+                    Refresh persisted state
+                </button>
+                or None}
                 <button
                     type="button"
                     className="button button-secondary button-danger"
-                    disabled={busy}
+                    disabled={busy or uncertain or not can_reject}
                     onClick={lambda { on_decide(False); }}
                 >
                     Reject &amp; stop
@@ -423,10 +611,10 @@ def ApprovalPanel(
                 <button
                     type="button"
                     className="button button-approval"
-                    disabled={busy}
+                    disabled={busy or uncertain or not can_approve}
                     onClick={lambda { on_decide(True); }}
                 >
-                    Approve &amp; continue
+                    Approve exact change
                 </button>
             </div>
         </section>;
@@ -499,6 +687,93 @@ def ArtifactPanel(demo: DemoState) -> JsxElement {
         </section>;
 }
 
+def ReceiptPanel(demo: DemoState) -> JsxElement {
+    receipt = demo.receipt;
+    return
+        <section className="proof-panel receipt-panel" aria-labelledby="receipt-title">
+            <div className="section-heading">
+                <div>
+                    <p className="eyebrow">Persisted run receipt</p>
+                    <h2 id="receipt-title">{receipt.state.replace("_", " ")}</h2>
+                </div>
+                <span className="proof-state">
+                    {receipt.effect_outcome.replace("_", " ")
+                        if receipt.effect_outcome != ""
+                        else "No effect"}
+                </span>
+            </div>
+            <div className="receipt-columns">
+                <div>
+                    <h3>Planned</h3>
+                    {receipt.planned_effects
+                    and <ul>{[
+                        <li key={effect}>{effect}</li>
+                        for effect in receipt.planned_effects
+                    ]}</ul>
+                    or <p>Not available yet.</p>}
+                </div>
+                <div>
+                    <h3>Performed</h3>
+                    {receipt.performed_effects
+                    and <ul>{[
+                        <li key={effect}>{effect}</li>
+                        for effect in receipt.performed_effects
+                    ]}</ul>
+                    or <p>No effects recorded.</p>}
+                </div>
+            </div>
+            <dl className="proof-grid">
+                <div>
+                    <dt>Open Result</dt>
+                    <dd>{receipt.open_disposition.replace("_", " ")}</dd>
+                </div>
+                <div>
+                    <dt>Retries</dt>
+                    <dd>{str(receipt.retry_count)}</dd>
+                </div>
+                <div>
+                    <dt>Duplicate state</dt>
+                    <dd>{receipt.duplicate_protection_state.replace("_", " ")}</dd>
+                </div>
+                <div>
+                    <dt>Compiler origin</dt>
+                    <dd>{receipt.compiler_provenance.mode}</dd>
+                </div>
+                <div>
+                    <dt>Artifact</dt>
+                    <dd>{receipt.artifact_path if receipt.artifact_path != "" else "None"}</dd>
+                </div>
+                <div>
+                    <dt>Artifact hash</dt>
+                    <dd>{receipt.artifact_hash if receipt.artifact_hash != "" else "None"}</dd>
+                </div>
+            </dl>
+            {receipt.open_reason != ""
+            and <p className="receipt-note">{receipt.open_reason}</p>
+            or None}
+            <div className="receipt-columns">
+                <div>
+                    <h3>Sources</h3>
+                    {receipt.source_references
+                    and <ul>{[
+                        <li key={source}><code>{source}</code></li>
+                        for source in receipt.source_references
+                    ]}</ul>
+                    or <p>None recorded.</p>}
+                </div>
+                <div>
+                    <h3>Deviations</h3>
+                    {receipt.deviations
+                    and <ul className="blocker-list">{[
+                        <li key={deviation}>{deviation}</li>
+                        for deviation in receipt.deviations
+                    ]}</ul>
+                    or <p>None.</p>}
+                </div>
+            </div>
+        </section>;
+}
+
 def:pub app -> JsxElement {
     has prompt: str = (
         "Prepare me for tomorrow's meetings using the dedicated QuaZe demo "
@@ -510,6 +785,7 @@ def:pub app -> JsxElement {
         connector_mode: str = "fixture",
         pending_action: str = "",
         error_message: str = "",
+        approval_uncertain: bool = False,
         request_epoch: int = 0;
 
     def accept_demo(next_demo: DemoState, epoch: int) -> None {
@@ -647,6 +923,7 @@ def:pub app -> JsxElement {
             response = root spawn get_run(run_id=demo.run_id);
             if response.reports and len(response.reports) > 0 {
                 accept_demo(response.reports[0], epoch);
+                approval_uncertain = False;
             } else {
                 error_message = "No persisted run was found. Keep this screen open and retry.";
             }
@@ -663,22 +940,98 @@ def:pub app -> JsxElement {
             pending_action != ""
             or demo is None
             or str(demo.run_state) != "awaiting_approval"
+            or approval_uncertain
         ) {
             return;
         }
         request_epoch += 1;
         epoch = request_epoch;
-        pending_action = "approval";
+        decision_request_id = (
+            demo.run_id + ":" + str(demo.approval.generation) + ":" + str(epoch)
+        );
+        pending_action = "decision";
         error_message = "";
         try {
-            response = root spawn approve_run(run_id=demo.run_id, approved=approved);
+            response = root spawn approve_run(
+                run_id=demo.run_id,
+                approved=approved,
+                effect_digest=demo.approval.effect_digest,
+                approval_nonce=demo.approval.nonce,
+                decision_request_id=decision_request_id
+            );
+            if response.reports and len(response.reports) > 0 {
+                decision_state = response.reports[0];
+                accept_demo(decision_state, epoch);
+                outcome = decision_state.approval_outcome;
+                if outcome.state == "accepted" {
+                    pending_action = "resume";
+                    try {
+                        resumed = root spawn recover_run(run_id=decision_state.run_id);
+                        if resumed.reports and len(resumed.reports) > 0 {
+                            accept_demo(resumed.reports[0], epoch);
+                        } else {
+                            error_message = (
+                                "Approval was persisted, but resume returned no state. "
+                                "Use Resume persisted run."
+                            );
+                        }
+                    } except Exception as _resume_error {
+                        error_message = (
+                            "Approval was persisted, but resume could not complete. "
+                            "Use Resume persisted run."
+                        );
+                    }
+                } elif outcome.state == "uncertain" {
+                    approval_uncertain = True;
+                    error_message = outcome.message;
+                } elif outcome.state in ["stale", "canceled"] {
+                    error_message = outcome.message;
+                }
+            } else {
+                approval_uncertain = True;
+                error_message = (
+                    "Decision delivery is uncertain. Refresh persisted state; "
+                    "do not submit another decision yet."
+                );
+            }
+        } except Exception as _error {
+            approval_uncertain = True;
+            error_message = (
+                "Decision delivery is uncertain. Refresh persisted state; "
+                "do not submit another decision yet."
+            );
+        }
+        if epoch == request_epoch {
+            pending_action = "";
+        }
+    }
+
+    async def resume_run -> None {
+        if (
+            pending_action != ""
+            or demo is None
+            or demo.run_id == ""
+            or str(demo.run_state) != "running"
+            or demo.approval_outcome.state not in [
+                "accepted",
+                "already_completed_same_decision"
+            ]
+        ) {
+            return;
+        }
+        request_epoch += 1;
+        epoch = request_epoch;
+        pending_action = "resume";
+        error_message = "";
+        try {
+            response = root spawn recover_run(run_id=demo.run_id);
             if response.reports and len(response.reports) > 0 {
                 accept_demo(response.reports[0], epoch);
             } else {
-                error_message = "The approval decision was not recorded. Retry before closing.";
+                error_message = "The persisted approved run did not resume. Refresh and retry.";
             }
         } except Exception as _error {
-            error_message = "The approval decision could not be recorded. Retry before closing.";
+            error_message = "The persisted approval remains recorded. Resume or refresh again.";
         }
         if epoch == request_epoch {
             pending_action = "";
@@ -729,6 +1082,41 @@ def:pub app -> JsxElement {
         str(demo.run_state) == "running"
         or str(demo.run_state) == "awaiting_approval"
     );
+    approval_pair_matches = (
+        demo.approval.state == "requested"
+        and demo.approval.effect_digest != ""
+        and demo.approval.nonce != ""
+        and demo.approval.effect_digest == demo.effect_proposal.effect_digest
+        and demo.approval.nonce == demo.effect_proposal.approval_nonce
+        and demo.approval.generation
+            == demo.effect_proposal.approval_generation
+        and demo.run_contract.contract_id == demo.effect_proposal.contract_id
+    );
+    can_approve = (
+        approval_pair_matches
+        and demo.effect_proposal.state == "ready"
+        and demo.effect_proposal.approval_allowed
+        and demo.effect_proposal.content_visibility == "full_synthetic_fixture"
+        and not demo.effect_proposal.proposed_content_truncated
+        and not demo.effect_proposal.diff_truncated
+        and not demo.effect_proposal.blockers
+    );
+    can_reject = (
+        demo.approval.state == "requested"
+        and demo.approval.nonce != ""
+        and demo.approval.effect_digest == demo.effect_proposal.effect_digest
+        and demo.approval.nonce == demo.effect_proposal.approval_nonce
+        and demo.approval.generation
+            == demo.effect_proposal.approval_generation
+    );
+    can_resume = (
+        str(demo.run_state) == "running"
+        and demo.approval.state == "approved"
+        and demo.approval_outcome.state in [
+            "accepted",
+            "already_completed_same_decision"
+        ]
+    );
 
     return
         <main className="quaze-app">
@@ -737,7 +1125,7 @@ def:pub app -> JsxElement {
                     <span className="brand-mark">QZ</span>
                     <span>
                         <strong>QuaZe</strong>
-                        <small>Tomorrow brief</small>
+                        <small>Outcome-to-agent builder</small>
                     </span>
                 </a>
                 <div className="mode-strip" aria-label="Runtime modes">
@@ -746,27 +1134,16 @@ def:pub app -> JsxElement {
                         value={demo.compiler_mode}
                         tone={compiler_tone(demo.compiler_mode)}
                     />
-                    <label className="connector-control">
-                        <span>Connectors</span>
-                        <select
-                            aria-label="Connector mode"
-                            value={connector_mode}
-                            disabled={busy or run_active}
-                            onChange={lambda (event: ChangeEvent) { connector_mode = event.target.value; }}
-                        >
-                            <option value="fixture">Fixture</option>
-                            <option value="live">Live demo</option>
-                        </select>
-                    </label>
+                    <ModeLabel label="Connectors" value="fixture only" tone="neutral"/>
                 </div>
             </header>
             <section className="prompt-section" aria-labelledby="prompt-title">
                 <div className="prompt-heading">
                     <div>
                         <p className="eyebrow">
-                            First supported workflow · tomorrow
+                            Verified template · first supported workflow
                         </p>
-                        <h1 id="prompt-title">Prepare tomorrow’s meetings</h1>
+                        <h1 id="prompt-title">Describe the outcome. Keep the proof.</h1>
                     </div>
                     <span className="workflow-version">
                         {demo.workflow.name} · v{str(demo.workflow.version)}
@@ -796,9 +1173,8 @@ def:pub app -> JsxElement {
                 and <p className="compiler-notice">{demo.compiler_notice}</p>
                 or None}
                 <p className="connector-safety">
-                    {connector_mode == "live"
-                    and "Live demo is restricted to the dedicated QuaZe Demo calendar and demo vault."
-                    or "Fixture mode uses synthetic calendar and vault records only."}
+                    Fixture mode uses synthetic calendar and vault records only.
+                    Live execution is unavailable in this experimental checkpoint.
                 </p>
             </section>
             {error_message != ""
@@ -839,6 +1215,18 @@ def:pub app -> JsxElement {
                         and "Refreshing…"
                         or "Refresh trace"}
                     </button>
+                    {can_resume
+                    and <button
+                        type="button"
+                        className="button button-approval"
+                        disabled={busy}
+                        onClick={resume_run}
+                    >
+                        {pending_action == "resume"
+                        and "Resuming…"
+                        or "Resume persisted run"}
+                    </button>
+                    or None}
                     <button
                         type="button"
                         className="button button-primary run-button"
@@ -851,14 +1239,27 @@ def:pub app -> JsxElement {
                     </button>
                 </div>
             </section>
+            <div className="proof-layout">
+                <RunContractPanel demo={demo}/>
+                <EffectProposalPanel demo={demo}/>
+            </div>
             {str(demo.run_state) == "awaiting_approval"
-            and <ApprovalPanel demo={demo} busy={busy} on_decide={decide_approval}/>
+            and <ApprovalPanel
+                demo={demo}
+                busy={busy}
+                uncertain={approval_uncertain}
+                can_approve={can_approve}
+                can_reject={can_reject}
+                on_decide={decide_approval}
+                on_refresh={refresh_run}
+            />
             or None}
             <ArtifactPanel demo={demo}/>
+            <ReceiptPanel demo={demo}/>
             <footer className="product-footer">
                 <span>Calendar is read-only.</span>
                 <span>
-                    Live access is restricted to QuaZe Demo; vault reads stay path-contained.
+                    Live execution is unavailable; fixture vault reads stay path-contained.
                 </span>
                 {demo.run_id != "" and <code>run {demo.run_id}</code> or None}
             </footer>
