@@ -145,6 +145,39 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             config={"cron": "*/15 * * * *", "timezone": "America/Los_Angeles"}
         ),
         BlockDefinition(
+            type="trigger_voice",
+            category="trigger",
+            title="Voice Command",
+            subtitle="Microphone / Whisper Trigger",
+            description="Triggers on custom spoken voice phrase",
+            jac_node="TriggerBlock",
+            inputs=[],
+            outputs=["transcript", "confidence"],
+            config={"wakeWord": "Hey Swirl", "language": "en-US", "listenTimeoutSec": 10}
+        ),
+        BlockDefinition(
+            type="trigger_webhook",
+            category="trigger",
+            title="HTTP Webhook",
+            subtitle="REST Endpoint Listener",
+            description="Triggers when an incoming HTTP POST request is received",
+            jac_node="TriggerBlock",
+            inputs=[],
+            outputs=["payload", "headers"],
+            config={"path": "/api/v1/webhook", "method": "POST", "authRequired": False}
+        ),
+        BlockDefinition(
+            type="trigger_clipboard",
+            category="trigger",
+            title="Clipboard Listener",
+            subtitle="macOS Pasteboard Watcher",
+            description="Triggers when new text or image is copied to clipboard",
+            jac_node="TriggerBlock",
+            inputs=[],
+            outputs=["clipboardText", "contentType"],
+            config={"watchText": True, "minChars": 5}
+        ),
+        BlockDefinition(
             type="trigger_file",
             category="trigger",
             title="On File Created",

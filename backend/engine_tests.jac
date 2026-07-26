@@ -13,7 +13,8 @@ import from backend.mcp_bridge {
     MCPResponse, MCPToolSchema, MCPServerConfig,
     validate_server_name, parse_tools_response,
     validate_tool_arguments, notifications_initialized_request,
-    resources_list_request, prompts_list_request
+    resources_list_request, prompts_list_request,
+    builtin_mcp_servers, builtin_mcp_server
 }
 import from backend.code_generator { generate_jac_source }
 import from backend.models {
@@ -197,6 +198,14 @@ test "mcp bridge produces protocol requests" {
     assert call.params["name"] == "read_file";
     assert validate_transport({"transport": "stdio", "command": "npx"});
     assert not validate_transport({"transport": "http", "url": "http://example.com"});
+}
+
+test "jac owns built-in MCP server definitions" {
+    servers = builtin_mcp_servers();
+    assert len(servers) == 3;
+    fetch = builtin_mcp_server("fetch-mcp-server");
+    assert fetch["transport"] == "stdio";
+    assert fetch["command"] == "npx";
 }
 
 
@@ -486,4 +495,3 @@ test "workflow_presets returns 3 presets" {
     assert "desktop_cleaner" in ids;
     assert "mcp_scraper" in ids;
 }
-

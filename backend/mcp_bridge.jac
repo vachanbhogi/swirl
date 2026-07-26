@@ -24,6 +24,42 @@ node MCPServerNode {
     has config: dict = {};
 }
 
+"""Built-in MCP server definitions owned by the Jac workflow layer."""
+def builtin_mcp_servers() -> list[dict] {
+    return [
+        {
+            "name": "fetch-mcp-server",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-fetch"],
+            "description": "Fetch web pages for downstream AI transforms.",
+        },
+        {
+            "name": "filesystem",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users"],
+            "description": "Read approved local files through the MCP filesystem server.",
+        },
+        {
+            "name": "brave-search-mcp",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+            "description": "Search the web through a configured Brave MCP server.",
+        },
+    ];
+}
+
+def builtin_mcp_server(name: str) -> dict {
+    for server in builtin_mcp_servers() {
+        if str(server.get("name", "")) == name {
+            return server;
+        }
+    }
+    raise ValueError(f"Unknown built-in MCP server: {name}");
+}
+
 
 walker MCPDiscoveryWalker {
     has requests: list[MCPRequest] = [];

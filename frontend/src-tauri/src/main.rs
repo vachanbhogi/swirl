@@ -57,6 +57,32 @@ fn execute_node(
                 .get("eventType")
                 .and_then(Value::as_str)
                 .unwrap_or("trigger_email");
+            if event_type == "trigger_email" {
+                let request = MacActionRequest {
+                    app: "Mail".into(),
+                    action: "wait_for_new_message".into(),
+                    params: node.config.clone(),
+                    approved: true,
+                };
+                let result = macos::execute(&request);
+                if !result.success {
+                    return Err(result);
+                }
+                let email = result.output.clone().unwrap_or(Value::Null);
+                context.insert("email".into(), email.clone());
+                context.insert(
+                    "text".into(),
+                    email.get("content").cloned().unwrap_or(Value::Null),
+                );
+                let output = json!({
+                    "status": "triggered",
+                    "triggerType": event_type,
+                    "email": email
+                });
+                context.insert("trigger".into(), output.clone());
+                context.insert("triggerType".into(), Value::String(event_type.into()));
+                return Ok(output);
+            }
             let output = json!({
                 "status": "triggered",
                 "triggerType": event_type,
@@ -351,6 +377,11 @@ fn execute_workflow(
     )
     .map_err(|error| format!("Invalid Jac execution plan: {error}"))?;
 
+    println!(
+        "[Swirl][Workflow] running {} planned node(s)",
+        planned_nodes.len()
+    );
+
     emit(
         &app,
         event(
@@ -368,6 +399,10 @@ fn execute_workflow(
     let mut failed_node_id = None;
 
     for node in &planned_nodes {
+        println!(
+            "[Swirl][Workflow] starting node '{}' ({})",
+            node.title, node.category
+        );
         emit(
             &app,
             event("node_start", Some(node), Some("running"), None, None),
@@ -380,6 +415,7 @@ fn execute_workflow(
             &mcp,
         ) {
             Ok(output) => {
+                println!("[Swirl][Workflow] completed node '{}'", node.title);
                 context.insert(format!("node:{}", node.id), output.clone());
                 results.insert(node.id.clone(), output.clone());
                 completed.push(node.id.clone());
@@ -395,6 +431,11 @@ fn execute_workflow(
                 );
             }
             Err(error) => {
+                eprintln!(
+                    "[Swirl][Workflow] node '{}' stopped: {}",
+                    node.title,
+                    error.error.as_deref().unwrap_or("unknown error")
+                );
                 failed_node_id = Some(node.id.clone());
                 let output = serde_json::to_value(&error).unwrap_or(Value::Null);
                 let event_name = if error.approval_required {
@@ -419,6 +460,10 @@ fn execute_workflow(
     }
 
     let success = failed_node_id.is_none();
+    println!(
+        "[Swirl][Workflow] {}",
+        if success { "completed successfully" } else { "stopped with an error" }
+    );
     let summary = ExecutionSummary {
         success,
         context: Value::Object(context),
@@ -508,6 +553,11 @@ fn call_mcp_tool(
         .lock()
         .map_err(|error| error.to_string())?
         .call(&name, &tool, arguments)
+}
+
+#[tauri::command]
+fn list_builtin_mcp_servers(app: AppHandle) -> Result<Value, String> {
+    jac_runtime::invoke(&app, "mcp-servers", &json!({}))
 }
 
 #[tauri::command]
@@ -602,6 +652,7 @@ fn main() {
             remove_mcp_server,
             discover_mcp_tools,
             call_mcp_tool,
+            list_builtin_mcp_servers,
             save_workflow,
             load_workflow,
             list_workflows,

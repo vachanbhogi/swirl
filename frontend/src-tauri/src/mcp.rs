@@ -390,6 +390,7 @@ impl McpManager {
     }
 
     pub fn discover(&mut self, name: &str) -> Result<Value, String> {
+        println!("[Swirl][MCP] discovering tools on server '{name}'");
         self.rpc(name, "tools/list", json!({}))
     }
 
@@ -397,11 +398,17 @@ impl McpManager {
         if tool.trim().is_empty() {
             return Err("MCP tool name cannot be empty".into());
         }
-        self.rpc(
+        println!("[Swirl][MCP] calling '{tool}' on server '{name}'");
+        let result = self.rpc(
             name,
             "tools/call",
             json!({ "name": tool, "arguments": arguments }),
-        )
+        );
+        match &result {
+            Ok(_) => println!("[Swirl][MCP] completed '{tool}' on server '{name}'"),
+            Err(error) => eprintln!("[Swirl][MCP] failed '{tool}' on server '{name}': {error}"),
+        }
+        result
     }
 
     pub fn stop_all(&mut self) {

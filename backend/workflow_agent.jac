@@ -55,6 +55,7 @@ node WorkflowBlock {
 }
 
 
+node SourceBlock(WorkflowBlock) {}
 node TriggerBlock(WorkflowBlock) {}
 node LLMTransformBlock(WorkflowBlock) {}
 node MacAppBlock(WorkflowBlock) {}
@@ -97,6 +98,10 @@ walker WorkflowExecutorWalker {
             )
         );
         return True;
+    }
+
+    can execute_source with SourceBlock entry {
+        self.record(here);
     }
 
     can execute_trigger with TriggerBlock entry {
@@ -159,7 +164,7 @@ walker PromptToWorkflowWalker {
 def prompt_to_ast(user_prompt: str) -> WorkflowAst by llm(
     temperature=0.1,
     max_tokens=1800,
-    system_prompt="Return a safe Swirl workflow graph. Use only trigger, ai, mac, mcp, logic, and output categories."
+    system_prompt="Return a safe Swirl workflow graph with exactly one source node at the leftmost entry. Use source, ai, mac, mcp, logic, and output categories. The source config must contain eventType equal to trigger_email, trigger_file, or trigger_cron. Return connected nodes and edges only."
 );
 sem prompt_to_ast = "Compile a natural-language desktop automation request into a connected Swirl workflow AST.";
 sem prompt_to_ast.user_prompt = "The user's requested automation, including triggers, transformations, tools, and outputs.";
@@ -184,15 +189,25 @@ def _node(
     y: int,
     config: dict,
 ) -> dict {
+    normalized_type: str = block_type;
+    normalized_title: str = title;
+    normalized_category: str = category;
+    normalized_config: dict = config;
+    if category == "trigger" {
+        normalized_type = "source";
+        normalized_title = "Source";
+        normalized_category = "source";
+        normalized_config = {"eventType": block_type} | config;
+    }
     return {
         "id": node_id,
-        "type": block_type,
-        "title": title,
-        "category": category,
-        "jacNode": block_class_for(category),
+        "type": normalized_type,
+        "title": normalized_title,
+        "category": normalized_category,
+        "jacNode": block_class_for(normalized_category),
         "x": x,
         "y": y,
-        "config": config,
+        "config": normalized_config,
         "status": "idle",
     };
 }
@@ -211,6 +226,7 @@ def _edge(edge_id: str, source: str, target: str) -> dict {
 
 def block_class_for(category: str) -> str {
     classes: dict[str, str] = {
+        "source": "SourceBlock",
         "trigger": "TriggerBlock",
         "ai": "LLMTransformBlock",
         "mac": "MacAppBlock",
@@ -231,7 +247,7 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
     if "email" in lowered or "mail" in lowered {
         nodes = [
             _node("node-p1", "trigger_email", "On Email Received", "trigger", 80, 140, {
-                "mailbox": "Inbox", "filterSubject": "High Priority"
+                "mailbox": "Inbox", "filterSubject": ""
             }),
             _node("node-p2", "llm_summarize", "LLM Summarizer", "ai", 440, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
@@ -313,7 +329,9 @@ def instantiate_block(spec: dict) -> WorkflowBlock {
     category: str = str(spec.get("category", ""));
     config: dict = spec.get("config", {}) as dict;
 
-    if category == "trigger" {
+    if category == "source" {
+        return SourceBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+    } elif category == "trigger" {
         return TriggerBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
     } elif category == "ai" {
         return LLMTransformBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
