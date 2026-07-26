@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { Code, Copy, Check, Download, X, Sparkles, Terminal } from 'lucide-react';
 import { generateJacCode } from '../data/blockDefinitions';
 
-export default function JacCodeViewer({ nodes, edges, onClose, onExportJac }) {
+export default function JacCodeViewer({ nodes, edges, jacCode: generatedCode, onClose, onExportJac }) {
   const [copied, setCopied] = useState(false);
-  const jacCode = generateJacCode(nodes, edges);
+  const jacCode = generatedCode || generateJacCode(nodes, edges);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(jacCode);

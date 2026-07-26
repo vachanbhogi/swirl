@@ -15,7 +15,6 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
   };
 
   return (
-  return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="w-full max-w-md bg-neutral-950 rounded-2xl p-6 border border-neutral-800 shadow-2xl relative">
         {/* Modal Header */}

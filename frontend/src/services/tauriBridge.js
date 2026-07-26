@@ -4,8 +4,41 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
-export const isTauriEnvironment = () => true;
+export const isTauriEnvironment = () =>
+  typeof window !== 'undefined' &&
+  Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+
+export async function invokeBackend(command, args = {}) {
+  if (!isTauriEnvironment()) {
+    throw new Error('The Swirl backend is available when running the Tauri desktop app.');
+  }
+  return invoke(command, args);
+}
+
+export async function compileWorkflowPrompt(prompt, useLlm = true) {
+  return invokeBackend('compile_prompt', { prompt, useLlm });
+}
+
+export async function executeWorkflow(workflow, context = {}, approvals = []) {
+  return invokeBackend('execute_workflow', {
+    request: { ...workflow, context, approvals }
+  });
+}
+
+export async function generateJacSource(workflow) {
+  return invokeBackend('generate_jac_source', { workflow });
+}
+
+export async function getBackendHealth() {
+  return invokeBackend('backend_health');
+}
+
+export function listenToWorkflowEvents(handler) {
+  if (!isTauriEnvironment()) return Promise.resolve(() => {});
+  return listen('swirl-workflow-event', (event) => handler(event.payload));
+}
 
 export async function executeMacScriptViaTauri(appName, action, params) {
   try {
