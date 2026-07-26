@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Default for WorkflowPosition {
+    fn default() -> Self {
+        Self { x: 250.0, y: 180.0 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowNode {
@@ -14,6 +26,16 @@ pub struct WorkflowNode {
     pub jac_node: Option<String>,
     #[serde(default)]
     pub config: Value,
+    #[serde(default)]
+    pub position: WorkflowPosition,
+    #[serde(default)]
+    pub custom_prompt: String,
+    // Legacy layout fields are read from older workflow files and migrated before
+    // a record is returned or persisted again.
+    #[serde(default, rename = "x", skip_serializing)]
+    legacy_x: Option<f64>,
+    #[serde(default, rename = "y", skip_serializing)]
+    legacy_y: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +59,16 @@ pub struct WorkflowDocument {
 }
 
 impl WorkflowDocument {
+    pub fn migrate_legacy_layout(&mut self) {
+        for node in &mut self.nodes {
+            if let (Some(x), Some(y)) = (node.legacy_x, node.legacy_y) {
+                node.position = WorkflowPosition { x, y };
+            }
+            node.legacy_x = None;
+            node.legacy_y = None;
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.nodes.is_empty() {
             return Err("Workflow must contain at least one node".into());
@@ -66,12 +98,6 @@ impl WorkflowDocument {
             if node.title.len() > 200 {
                 return Err(format!("Node title is too long: {}", node.id));
             }
-            if node.category == "trigger" {
-                return Err(format!(
-                    "Legacy trigger node must be migrated to Source: {}",
-                    node.id
-                ));
-            }
         }
 
         let mut indegree: HashMap<&str, usize> = self
@@ -93,9 +119,9 @@ impl WorkflowDocument {
             if self
                 .nodes
                 .iter()
-                .any(|node| node.id == edge.target && node.category == "source")
+                .any(|node| node.id == edge.target && (node.category == "source" || node.category == "trigger"))
             {
-                return Err("Source node cannot have incoming edges".into());
+                return Err("On Run and trigger blocks cannot have incoming edges".into());
             }
             *indegree
                 .get_mut(edge.target.as_str())
@@ -127,15 +153,12 @@ impl WorkflowDocument {
         if queue.len() != self.nodes.len() {
             return Err("Workflow graph contains a cycle".into());
         }
-        let source_id = self
-            .nodes
-            .iter()
-            .find(|node| node.category == "source")
-            .expect("source count validated")
-            .id
-            .as_str();
-        let mut reachable = HashSet::from([source_id]);
-        let mut traversal = vec![source_id];
+        let roots = self.nodes.iter()
+            .filter(|node| node.category == "source" || node.category == "trigger")
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>();
+        let mut reachable = roots.iter().copied().collect::<HashSet<_>>();
+        let mut traversal = roots;
         let mut cursor = 0;
         while cursor < traversal.len() {
             let current = traversal[cursor];
@@ -149,7 +172,7 @@ impl WorkflowDocument {
             }
         }
         if reachable.len() != self.nodes.len() {
-            return Err("Every workflow node must be reachable from Source".into());
+            return Err("Every workflow node must be reachable from On Run or a trigger".into());
         }
         Ok(())
     }
@@ -168,6 +191,10 @@ mod tests {
             category: "source".into(),
             jac_node: None,
             config: json!({}),
+            position: WorkflowPosition::default(),
+            custom_prompt: String::new(),
+            legacy_x: None,
+            legacy_y: None,
         }
     }
 
@@ -288,6 +315,42 @@ mod tests {
             workflow.validate().unwrap_err(),
             "Every workflow node must be reachable from Source"
         );
+    }
+
+    #[test]
+    fn migrates_legacy_layout_and_serializes_persistence_fields() {
+        let mut workflow: WorkflowDocument = serde_json::from_value(json!({
+            "nodes": [
+                {
+                    "id": "workflow-source", "type": "source", "title": "Source",
+                    "category": "source", "config": {}, "x": 48, "y": 96
+                },
+                {
+                    "id": "ai", "type": "llm_summarize", "title": "AI",
+                    "category": "ai", "config": {},
+                    "position": { "x": 420, "y": 128 },
+                    "customPrompt": "Return only action items"
+                }
+            ],
+            "edges": [{
+                "id": "source-ai", "source": "workflow-source", "target": "ai",
+                "sourcePort": "event", "targetPort": "text"
+            }]
+        }))
+        .unwrap();
+
+        workflow.migrate_legacy_layout();
+        assert_eq!(
+            workflow.nodes[0].position,
+            WorkflowPosition { x: 48.0, y: 96.0 }
+        );
+        assert_eq!(workflow.nodes[1].custom_prompt, "Return only action items");
+        assert_eq!(workflow.edges[0].source_port.as_deref(), Some("event"));
+        assert_eq!(workflow.edges[0].target_port.as_deref(), Some("text"));
+
+        let serialized = serde_json::to_value(workflow).unwrap();
+        assert!(serialized["nodes"][0].get("x").is_none());
+        assert_eq!(serialized["nodes"][0]["position"]["x"], 48.0);
     }
 }
 

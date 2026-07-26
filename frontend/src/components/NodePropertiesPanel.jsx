@@ -58,11 +58,13 @@ export default function NodePropertiesPanel({
 }) {
   const [config, setConfig] = useState({});
   const [title, setTitle] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
 
   useEffect(() => {
     if (selectedNode) {
       setConfig(selectedNode.config || {});
       setTitle(selectedNode.title || '');
+      setCustomPrompt(selectedNode.customPrompt || '');
     }
   }, [selectedNode]);
 
@@ -119,7 +121,12 @@ export default function NodePropertiesPanel({
 
   const handleTitleChange = (val) => {
     setTitle(val);
-    onSaveNodeConfig(selectedNode.id, val, config);
+    onSaveNodeConfig(selectedNode.id, val, config, customPrompt);
+  };
+
+  const handleCustomPromptChange = (value) => {
+    setCustomPrompt(value);
+    onSaveNodeConfig(selectedNode.id, title, config, value);
   };
 
   const handleSourceEventChange = (eventType) => {
@@ -165,6 +172,20 @@ export default function NodePropertiesPanel({
             onChange={(e) => handleTitleChange(e.target.value)}
             className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-zinc-700 transition font-sans"
           />
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1 font-sans">
+            Custom Prompt
+          </label>
+          <textarea
+            rows={3}
+            value={customPrompt}
+            onChange={(e) => handleCustomPromptChange(e.target.value)}
+            placeholder="Optional instructions for this block during execution"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-sans text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition resize-y"
+          />
+          <p className="mt-1 text-[10px] text-zinc-500">AI blocks use this as their instruction. Other blocks receive it in execution context.</p>
         </div>
 
         {isSource && (

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   ZoomIn, 
   ZoomOut, 
@@ -39,32 +39,41 @@ export default function WhiteboardCard({
 
   const panRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
   const canvasRef = useRef(null);
+  const moveRef = useRef({ rect: null, event: null, rafId: null });
+
+  useEffect(() => () => {
+    if (moveRef.current.rafId) cancelAnimationFrame(moveRef.current.rafId);
+  }, []);
 
   // Mouse move handler for canvas panning, node dragging, and wire previews
   const handleMouseMove = (e) => {
     if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const currentX = (e.clientX - rect.left - pan.x) / zoom;
-    const currentY = (e.clientY - rect.top - pan.y) / zoom;
+    moveRef.current.event = e;
+    moveRef.current.rect ||= canvasRef.current.getBoundingClientRect();
+    if (moveRef.current.rafId) return;
+    moveRef.current.rafId = requestAnimationFrame(() => {
+      moveRef.current.rafId = null;
+      const event = moveRef.current.event;
+      const rect = moveRef.current.rect;
+      if (!event || !rect) return;
+      const currentX = (event.clientX - rect.left - pan.x) / zoom;
+      const currentY = (event.clientY - rect.top - pan.y) / zoom;
 
-    setMousePos({ x: currentX, y: currentY });
-
-    if (draggingNodeId) {
-      setNodes((prevNodes) =>
-        prevNodes.map((n) =>
+      if (draggingNodeId) {
+        setNodes((prevNodes) => prevNodes.map((n) =>
           n.id === draggingNodeId
-            ? { ...n, x: Math.round(currentX - dragOffset.x), y: Math.round(currentY - dragOffset.y) }
+            ? { ...n, position: { x: Math.round(currentX - dragOffset.x), y: Math.round(currentY - dragOffset.y) } }
             : n
-        )
-      );
-    } else if (isPanning) {
-      const dx = e.clientX - panRef.current.startX;
-      const dy = e.clientY - panRef.current.startY;
-      setPan({
-        x: panRef.current.initialX + dx,
-        y: panRef.current.initialY + dy
-      });
-    }
+        ));
+      } else if (isPanning) {
+        setPan({
+          x: panRef.current.initialX + event.clientX - panRef.current.startX,
+          y: panRef.current.initialY + event.clientY - panRef.current.startY
+        });
+      }
+
+      if (connectingPort) setMousePos({ x: currentX, y: currentY });
+    });
   };
 
   const handleMouseDown = (e) => {
@@ -86,6 +95,8 @@ export default function WhiteboardCard({
   };
 
   const handleMouseUp = () => {
+    moveRef.current.event = null;
+    moveRef.current.rect = null;
     setIsPanning(false);
     setDraggingNodeId(null);
     setConnectingPort(null);
@@ -134,8 +145,8 @@ export default function WhiteboardCard({
     const currentY = (e.clientY - rect.top - pan.y) / zoom;
 
     setDragOffset({
-      x: currentX - node.x,
-      y: currentY - node.y
+      x: currentX - node.position.x,
+      y: currentY - node.position.y
     });
   };
 
@@ -175,8 +186,8 @@ export default function WhiteboardCard({
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
     return {
-      x: isOutput ? node.x + 270 : node.x,
-      y: node.y + 42
+      x: isOutput ? node.position.x + 270 : node.position.x,
+      y: node.position.y + 42
     };
   };
 
@@ -258,12 +269,12 @@ export default function WhiteboardCard({
               <div
                 key={node.id}
                 onMouseDown={(e) => handleNodeMouseDown(e, node)}
-                style={{ left: `${node.x}px`, top: `${node.y}px`, width: '270px' }}
+                style={{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: '270px' }}
                 className={`figma-node-card ${
                   isRunning ? 'running' : ''
                 } ${node.status === 'success' ? 'success' : ''} ${
                   isSelected ? 'selected' : ''
-                } absolute z-10 p-4 font-sans text-left cursor-grab active:cursor-grabbing bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl transition-all hover:shadow-2xl text-zinc-100`}
+                } absolute z-10 p-4 font-sans text-left cursor-grab active:cursor-grabbing bg-zinc-950 border border-zinc-800 rounded-2xl shadow-xl transition-shadow hover:shadow-2xl text-zinc-100`}
               >
                 {/* Subtle Left Input Connector Handle (Matching Black Theme) */}
                 <div

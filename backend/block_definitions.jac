@@ -380,51 +380,17 @@ def default_starter_workflow() -> dict {
     return {
         "nodes": [
             {
-                "id": "workflow-source",
-                "type": "source",
-                "title": "Source",
+                "id": "workflow-on-run",
+                "type": "on_run",
+                "title": "On Run",
                 "category": "source",
                 "x": 60, 
                 "y": 120, 
-                "config": {"eventType": "trigger_email", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0},
+                "config": {},
                 "status": "idle"
             },
-            {
-                "id": "node-2", 
-                "type": "llm_summarize", 
-                "title": "LLM Summarizer", 
-                "category": "ai", 
-                "x": 420, 
-                "y": 120, 
-                "config": {"prompt": "Summarize this email and list any action items.", "maxTokens": 300, "temperature": 0.2},
-                "status": "idle"
-            },
-            {
-                "id": "node-3", 
-                "type": "mac_notes", 
-                "title": "Apple Notes", 
-                "category": "mac", 
-                "x": 780, 
-                "y": 60, 
-                "config": {"app": "Notes", "action": "create_note", "folder": "Swirl Action Items", "defaultTitle": "Email Summary"},
-                "status": "idle"
-            },
-            {
-                "id": "node-4", 
-                "type": "mac_notification", 
-                "title": "Mac Notification", 
-                "category": "mac", 
-                "x": 780, 
-                "y": 260, 
-                "config": {"app": "System", "action": "display_notification", "sound": "Glass"}, 
-                "status": "idle"
-            }
         ],
-        "edges": [
-            {"id": "edge-1-2", "source": "workflow-source", "target": "node-2", "sourcePort": "event", "targetPort": "text"},
-            {"id": "edge-2-3", "source": "node-2", "target": "node-3", "sourcePort": "summary", "targetPort": "text"},
-            {"id": "edge-2-4", "source": "node-2", "target": "node-4", "sourcePort": "actionItems", "targetPort": "text"}
-        ]
+        "edges": []
     };
 }
 

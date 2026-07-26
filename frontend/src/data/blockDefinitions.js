@@ -296,72 +296,19 @@ export const BLOCK_LIBRARY = [
 // Initial Starter Workflow
 export const INITIAL_NODES = [
   {
-    id: 'workflow-source',
-    type: 'source',
-    title: 'Source',
+    id: 'workflow-on-run',
+    type: 'on_run',
+    title: 'On Run',
     category: 'source',
     jacNode: 'SourceBlock',
     x: 60,
     y: 120,
-    config: {
-      eventType: 'trigger_email',
-      mailbox: 'Inbox',
-      filterSubject: '',
-      checkIntervalSec: 15,
-      waitTimeoutSec: 0
-    },
+    config: {},
     status: 'idle'
   },
-  {
-    id: 'node-2',
-    type: 'llm_summarize',
-    title: 'LLM Summarizer',
-    category: 'ai',
-    x: 420,
-    y: 120,
-    config: {
-      prompt: 'Summarize this email and list any action items.',
-      maxTokens: 300,
-      temperature: 0.2
-    },
-    status: 'idle'
-  },
-  {
-    id: 'node-3',
-    type: 'mac_notes',
-    title: 'Apple Notes',
-    category: 'mac',
-    x: 780,
-    y: 60,
-    config: {
-      app: 'Notes',
-      action: 'create_note',
-      folder: 'Swirl Action Items',
-      defaultTitle: 'Email Summary'
-    },
-    status: 'idle'
-  },
-  {
-    id: 'node-4',
-    type: 'mac_notification',
-    title: 'Mac Notification',
-    category: 'mac',
-    x: 780,
-    y: 260,
-    config: {
-      app: 'System',
-      action: 'display_notification',
-      sound: 'Glass'
-    },
-    status: 'idle'
-  }
 ];
 
-export const INITIAL_EDGES = [
-  { id: 'edge-1-2', source: 'workflow-source', target: 'node-2', sourcePort: 'event', targetPort: 'text' },
-  { id: 'edge-2-3', source: 'node-2', target: 'node-3', sourcePort: 'summary', targetPort: 'text' },
-  { id: 'edge-2-4', source: 'node-2', target: 'node-4', sourcePort: 'actionItems', targetPort: 'text' }
-];
+export const INITIAL_EDGES = [];
 
 // Workflow Presets
 export const WORKFLOW_PRESETS = [
@@ -604,6 +551,7 @@ with entry {
         id="${n.id}",
         block_type="${n.type}",
         title="${n.title.replace(/"/g, '\\"')}",
+        custom_prompt="${(n.customPrompt || '').replace(/"/g, '\\"')}",
         config=${configJson}
     );\n`;
   });

@@ -253,10 +253,9 @@ fn execute_node(
                 .and_then(Value::as_str)
                 .or_else(|| node.config.get("text").and_then(Value::as_str))
                 .unwrap_or_default();
-            let instruction = node
-                .config
-                .get("prompt")
-                .and_then(Value::as_str)
+            let instruction = (!node.custom_prompt.trim().is_empty())
+                .then_some(node.custom_prompt.as_str())
+                .or_else(|| node.config.get("prompt").and_then(Value::as_str))
                 .unwrap_or("Summarize concisely");
             let llm_configured = [
                 "OPENAI_API_KEY",
@@ -538,9 +537,21 @@ fn execute_workflow(
             "[Swirl][Workflow] starting node '{}' ({})",
             node.title, node.category
         );
+        context.insert(
+            "customPrompt".into(),
+            Value::String(node.custom_prompt.clone()),
+        );
+        context.insert("currentNodeId".into(), Value::String(node.id.clone()));
         emit(
             &app,
-            event("node_start", Some(node), Some("running"), None, None),
+            event(
+                "node_start",
+                Some(node),
+                Some("running"),
+                (!node.custom_prompt.trim().is_empty())
+                    .then(|| "Custom prompt added to execution context".into()),
+                None,
+            ),
         );
         match execute_node(
             &app,
@@ -550,6 +561,16 @@ fn execute_workflow(
             &mcp,
         ) {
             Ok(output) => {
+                let output = match output {
+                    Value::Object(mut object) => {
+                        object.insert(
+                            "customPrompt".into(),
+                            Value::String(node.custom_prompt.clone()),
+                        );
+                        Value::Object(object)
+                    }
+                    value => json!({ "result": value, "customPrompt": node.custom_prompt }),
+                };
                 println!("[Swirl][Workflow] completed node '{}'", node.title);
                 context.insert(format!("node:{}", node.id), output.clone());
                 results.insert(node.id.clone(), output.clone());

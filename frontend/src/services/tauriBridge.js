@@ -39,6 +39,22 @@ export async function getBackendHealth() {
   return invokeBackend('backend_health');
 }
 
+export async function saveWorkflow(name, workflow) {
+  return invokeBackend('save_workflow', { name, workflow });
+}
+
+export async function loadWorkflow(name) {
+  return invokeBackend('load_workflow', { name });
+}
+
+export async function listWorkflows() {
+  return invokeBackend('list_workflows');
+}
+
+export async function deleteWorkflow(name) {
+  return invokeBackend('delete_workflow', { name });
+}
+
 export function listenToWorkflowEvents(handler) {
   if (!isTauriEnvironment()) return Promise.resolve(() => {});
   return listen('swirl-workflow-event', (event) => handler(event.payload));

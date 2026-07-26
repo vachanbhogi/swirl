@@ -47,7 +47,7 @@ export default function ScratchCanvas({
       setNodes((prevNodes) =>
         prevNodes.map((n) =>
           n.id === draggingNodeId
-            ? { ...n, x: Math.max(20, currentX - dragOffset.x), y: Math.max(20, currentY - dragOffset.y) }
+            ? { ...n, position: { x: Math.max(20, currentX - dragOffset.x), y: Math.max(20, currentY - dragOffset.y) } }
             : n
         )
       );
@@ -89,8 +89,8 @@ export default function ScratchCanvas({
 
     const rect = canvasRef.current.getBoundingClientRect();
     setDragOffset({
-      x: e.clientX - rect.left - node.x,
-      y: e.clientY - rect.top - node.y
+      x: e.clientX - rect.left - node.position.x,
+      y: e.clientY - rect.top - node.position.y
     });
   };
 
@@ -134,8 +134,8 @@ export default function ScratchCanvas({
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
     return {
-      x: isOutput ? node.x + 280 : node.x,
-      y: node.y + 45
+      x: isOutput ? node.position.x + 280 : node.position.x,
+      y: node.position.y + 45
     };
   };
 
@@ -209,32 +209,34 @@ export default function ScratchCanvas({
 
         const isRunning = activeNodeId === node.id;
         const isSelected = selectedNodeId === node.id;
+        const isOutputOnly = node.category === 'trigger' || node.category === 'source';
 
         return (
           <div
             key={node.id}
             onMouseDown={(e) => handleNodeMouseDown(e, node)}
-            style={{ left: `${node.x}px`, top: `${node.y}px`, width: '280px' }}
+            style={{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: '280px' }}
             className={`scratch-block block-cat-${node.category} ${
               isRunning ? 'node-running' : ''
             } ${node.status === 'success' ? 'node-success' : ''} ${
               isSelected ? 'selected' : ''
             } z-10 p-3.5 rounded-xl border relative`}
           >
-            {/* Input Port (Left Side) */}
-            <div
-              onMouseUp={(e) => handlePortMouseUp(e, node.id, 'in', false)}
-              onMouseDown={(e) => handlePortMouseDown(e, node.id, 'in', false)}
-              className="block-port absolute -left-2 top-[38px] z-20 shadow-md"
-              title="Input Connect Port"
-            />
+            {!isOutputOnly && (
+              <div
+                onMouseUp={(e) => handlePortMouseUp(e, node.id, 'in', false)}
+                onMouseDown={(e) => handlePortMouseDown(e, node.id, 'in', false)}
+                className="block-port absolute -left-2 top-[38px] z-20 shadow-md"
+                title="Input Connect Port (accepts multiple connections)"
+              />
+            )}
 
             {/* Output Port (Right Side) */}
             <div
               onMouseUp={(e) => handlePortMouseUp(e, node.id, 'out', true)}
               onMouseDown={(e) => handlePortMouseDown(e, node.id, 'out', true)}
               className="block-port absolute -right-2 top-[38px] z-20 shadow-md"
-              title="Output Connect Port"
+              title={node.category === 'trigger' ? 'Trigger output' : 'Output Connect Port'}
             />
 
             {/* Block Header */}

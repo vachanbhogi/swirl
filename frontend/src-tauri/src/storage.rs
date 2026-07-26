@@ -30,6 +30,17 @@ fn safe_name(name: &str) -> Result<String, String> {
     Ok(trimmed.replace(' ', "_"))
 }
 
+fn ensure_record_name(record: &WorkflowRecord, requested_name: &str) -> Result<(), String> {
+    if record.name == requested_name.trim() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Workflow name conflicts with existing workflow \"{}\" after filename normalization",
+            record.name
+        ))
+    }
+}
+
 fn data_dir(app: &AppHandle, kind: &str) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -50,10 +61,18 @@ fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), String> 
 pub fn save_workflow(
     app: &AppHandle,
     name: &str,
-    workflow: WorkflowDocument,
+    mut workflow: WorkflowDocument,
 ) -> Result<WorkflowRecord, String> {
+    workflow.migrate_legacy_layout();
     workflow.validate()?;
     let file_name = safe_name(name)?;
+    let path = data_dir(app, "workflows")?.join(format!("{file_name}.json"));
+    if path.exists() {
+        let existing: WorkflowRecord =
+            serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        ensure_record_name(&existing, name)?;
+    }
     let updated_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
@@ -63,10 +82,7 @@ pub fn save_workflow(
         updated_at,
         workflow,
     };
-    atomic_json_write(
-        &data_dir(app, "workflows")?.join(format!("{file_name}.json")),
-        &record,
-    )?;
+    atomic_json_write(&path, &record)?;
     Ok(record)
 }
 
@@ -74,7 +90,11 @@ pub fn load_workflow(app: &AppHandle, name: &str) -> Result<WorkflowRecord, Stri
     let file_name = safe_name(name)?;
     let bytes = fs::read(data_dir(app, "workflows")?.join(format!("{file_name}.json")))
         .map_err(|error| error.to_string())?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    let mut record: WorkflowRecord =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    ensure_record_name(&record, name)?;
+    record.workflow.migrate_legacy_layout();
+    Ok(record)
 }
 
 pub fn list_workflows(app: &AppHandle) -> Result<Vec<WorkflowRecord>, String> {
@@ -85,7 +105,10 @@ pub fn list_workflows(app: &AppHandle) -> Result<Vec<WorkflowRecord>, String> {
             continue;
         }
         let bytes = fs::read(path).map_err(|error| error.to_string())?;
-        records.push(serde_json::from_slice(&bytes).map_err(|error| error.to_string())?);
+        let mut record: WorkflowRecord =
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        record.workflow.migrate_legacy_layout();
+        records.push(record);
     }
     records.sort_by(|left: &WorkflowRecord, right: &WorkflowRecord| {
         right.updated_at.cmp(&left.updated_at)
@@ -99,6 +122,10 @@ pub fn delete_workflow(app: &AppHandle, name: &str) -> Result<bool, String> {
     if !path.exists() {
         return Ok(false);
     }
+    let record: WorkflowRecord =
+        serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    ensure_record_name(&record, name)?;
     fs::remove_file(path).map_err(|error| error.to_string())?;
     Ok(true)
 }
@@ -111,4 +138,23 @@ pub fn save_trace(app: &AppHandle, trace: &Value) -> Result<String, String> {
     let file_name = format!("trace-{timestamp}.json");
     atomic_json_write(&data_dir(app, "traces")?.join(&file_name), trace)?;
     Ok(file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_names_that_share_a_normalized_filename() {
+        let record = WorkflowRecord {
+            name: "Daily Brief".into(),
+            updated_at: 0,
+            workflow: WorkflowDocument {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            },
+        };
+        assert!(ensure_record_name(&record, "Daily_Brief").is_err());
+        assert!(ensure_record_name(&record, "Daily Brief").is_ok());
+    }
 }

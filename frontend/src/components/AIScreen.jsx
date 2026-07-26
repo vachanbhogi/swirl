@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ArrowRight, Wand2, Loader2, Bot, Cpu } from 'lucide-react';
+import { Sparkles, ArrowRight, Wand2, Loader2, Bot, Cpu, ArrowLeft } from 'lucide-react';
 
 const PRESET_PROMPTS = [
   {
@@ -24,7 +24,8 @@ const PRESET_PROMPTS = [
 
 export default function AIScreen({
   onGenerateFromPrompt,
-  isCompilingPrompt
+  isCompilingPrompt,
+  onSwitchToWorkflow
 }) {
   const [promptText, setPromptText] = useState('');
 
@@ -137,6 +138,15 @@ export default function AIScreen({
           </div>
 
         </div>
+
+        {/* Back Button — pinned to bottom */}
+        <button
+          onClick={onSwitchToWorkflow}
+          className="mt-6 flex items-center gap-2 text-xs font-semibold text-zinc-500 hover:text-white transition"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Back to Canvas</span>
+        </button>
       </div>
     </div>
   );

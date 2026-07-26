@@ -1,4 +1,4 @@
-export const SOURCE_ID = 'workflow-source';
+export const SOURCE_ID = 'workflow-on-run';
 
 export const SOURCE_EVENTS = {
   trigger_email: {
@@ -51,81 +51,79 @@ export const sourceConfig = (eventType = 'trigger_email', config = {}) => {
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-export function createSourceNode(config = {}, x = 32, y = 140) {
-  const normalizedConfig = sourceConfig(config.eventType || 'trigger_email', config);
-  const event = SOURCE_EVENTS[normalizedConfig.eventType];
+export function createSourceNode(_config = {}, x = 32, y = 140) {
   return {
     id: SOURCE_ID,
-    type: 'source',
-    title: 'Source',
+    type: 'on_run',
+    title: 'On Run',
     category: 'source',
     jacNode: 'SourceBlock',
-    x,
-    y,
-    config: normalizedConfig,
+    position: { x, y },
+    customPrompt: '',
+    config: {},
     status: 'idle'
   };
 }
 
-function legacyTriggerToSource(trigger) {
-  const eventType = SOURCE_EVENTS[trigger?.type] ? trigger.type : 'trigger_email';
-  return createSourceNode({ eventType, ...(trigger?.config || {}) }, 32, trigger?.y ?? 140);
+function normalizePosition(node, fallback) {
+  const x = node?.position?.x ?? node?.x ?? fallback.x;
+  const y = node?.position?.y ?? node?.y ?? fallback.y;
+  return {
+    x: Number.isFinite(Number(x)) ? Number(x) : fallback.x,
+    y: Number.isFinite(Number(y)) ? Number(y) : fallback.y
+  };
+}
+
+function normalizeNode(node) {
+  const { x, y, position, customPrompt, ...rest } = node;
+  return {
+    ...rest,
+    position: normalizePosition(node, { x: 250, y: 180 }),
+    customPrompt: typeof customPrompt === 'string' ? customPrompt : '',
+    config: node.config || {},
+    status: node.status || 'idle'
+  };
 }
 
 /**
- * Makes any graph safe for the canonical source contract. This is intentionally
- * pure so prompt results, presets, and persisted legacy workflows share one path.
+ * Makes every graph start with a fixed manual "On Run" block. Trigger blocks stay
+ * intact: each is an output-only event source and several can feed one action.
  */
 export function normalizeWorkflow(nodes = [], edges = []) {
   const inputNodes = clone(nodes || []);
   const inputEdges = clone(edges || []);
-  const sourceCandidates = inputNodes.filter((node) => node.category === 'source' || node.type === 'source');
-  const legacyTriggers = inputNodes.filter((node) => node.category === 'trigger');
-  const source = sourceCandidates[0] || (legacyTriggers[0] ? legacyTriggerToSource(legacyTriggers[0]) : createSourceNode());
-  const removedIds = new Set([
-    ...sourceCandidates.slice(1).map((node) => node.id),
-    ...legacyTriggers.map((node) => node.id).filter((id) => id !== source.id)
-  ]);
+  const sourceCandidates = inputNodes.filter((node) => node.category === 'source' || node.type === 'source' || node.type === 'on_run');
+  const source = sourceCandidates[0] || createSourceNode();
+  const removedIds = new Set(sourceCandidates.slice(1).map((node) => node.id));
   const existingSourceId = sourceCandidates[0]?.id;
   if (existingSourceId && existingSourceId !== SOURCE_ID) {
     removedIds.add(existingSourceId);
   }
 
   source.id = SOURCE_ID;
-  source.type = 'source';
+  source.type = 'on_run';
   source.category = 'source';
-  source.title = 'Source';
+  source.title = 'On Run';
   source.jacNode = 'SourceBlock';
-  source.x = 32;
-  source.config = sourceConfig(source.config?.eventType || 'trigger_email', source.config);
+  source.position = normalizePosition(source, { x: 32, y: 140 });
+  source.customPrompt = typeof source.customPrompt === 'string' ? source.customPrompt : '';
+  delete source.x;
+  delete source.y;
+  source.config = {};
 
   const retainedNodes = inputNodes
-    .filter((node) => !removedIds.has(node.id) && node.category !== 'trigger')
-    .map((node) => ({ ...node, status: node.status || 'idle' }));
+    .filter((node) => !removedIds.has(node.id))
+    .map(normalizeNode);
   const nodeIds = new Set(retainedNodes.map((node) => node.id));
   const rewiredEdges = inputEdges
     .filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target) && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => ({ ...edge }));
 
-  // Preserve every former trigger branch by connecting its outgoing targets to Source.
-  const oldTriggerIds = new Set(legacyTriggers.map((node) => node.id));
-  inputEdges.forEach((edge) => {
-    if (!oldTriggerIds.has(edge.source) || !nodeIds.has(edge.target)) return;
-    if (!rewiredEdges.some((candidate) => candidate.source === SOURCE_ID && candidate.target === edge.target)) {
-      rewiredEdges.push({
-        id: `edge-${SOURCE_ID}-${edge.target}`,
-        source: SOURCE_ID,
-        target: edge.target,
-        sourcePort: 'event',
-        targetPort: edge.targetPort || 'in'
-      });
-    }
-  });
-
-  // A graph with no legacy trigger gets Source edges to all roots.
+  // Make the manual starter reach unconnected action roots. Existing trigger
+  // connections are retained, including multiple triggers into one action.
   const incomingTargets = new Set(rewiredEdges.map((edge) => edge.target));
   retainedNodes.forEach((node) => {
-    if (node.id !== SOURCE_ID && !incomingTargets.has(node.id) && !rewiredEdges.some((edge) => edge.source === SOURCE_ID && edge.target === node.id)) {
+    if (node.id !== SOURCE_ID && node.category !== 'trigger' && !incomingTargets.has(node.id) && !rewiredEdges.some((edge) => edge.source === SOURCE_ID && edge.target === node.id)) {
       rewiredEdges.push({ id: `edge-${SOURCE_ID}-${node.id}`, source: SOURCE_ID, target: node.id, sourcePort: 'event', targetPort: 'in' });
     }
   });

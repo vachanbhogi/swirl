@@ -33,6 +33,7 @@ obj WorkflowDocument {
         }
 
         ids: set[str] = set();
+        categories: dict[str, str] = {};
         source_count: int = 0;
         source_id: str = "";
         for node in self.nodes {
@@ -44,15 +45,11 @@ obj WorkflowDocument {
                 raise ValueError(f"Duplicate workflow node ID: {node_id}");
             }
             ids.add(node_id);
+            categories[node_id] = str(node.get("category", ""));
             if len(str(node.get("title", ""))) > 200 {
                 raise ValueError(f"Node title is too long: {node_id}");
             }
             category: str = str(node.get("category", ""));
-            if category == "trigger" {
-                raise ValueError(
-                    f"Legacy trigger node must be migrated to Source: {node_id}"
-                );
-            }
             if category == "source" {
                 source_count += 1;
                 source_id = node_id;
@@ -84,8 +81,9 @@ obj WorkflowDocument {
                     f"Self-referencing edge is not allowed: {edge_id}"
                 );
             }
-            if target == source_id {
-                raise ValueError("Source node cannot have incoming edges");
+            target_category: str = categories[target];
+            if target_category == "source" or target_category == "trigger" {
+                raise ValueError("On Run and trigger blocks cannot have incoming edges");
             }
             indegree[target] += 1;
             outgoing[edge_source].append(target);
@@ -111,8 +109,9 @@ obj WorkflowDocument {
         if len(queue) != len(self.nodes) {
             raise ValueError("Workflow graph contains a cycle");
         }
-        reachable: set[str] = {source_id};
-        traversal: list[str] = [source_id];
+        roots: list[str] = [str(node.get("id", "")) for node in self.nodes if node.get("category") == "source" or node.get("category") == "trigger"];
+        reachable: set[str] = set(roots);
+        traversal: list[str] = roots;
         cursor = 0;
         while cursor < len(traversal) {
             current: str = traversal[cursor];
@@ -126,7 +125,7 @@ obj WorkflowDocument {
         }
         if len(reachable) != len(self.nodes) {
             raise ValueError(
-                "Every workflow node must be reachable from Source"
+                "Every workflow node must be reachable from On Run or a trigger"
             );
         }
     }
@@ -184,9 +183,9 @@ def source_node(node_id: str = "source") -> dict {
     return {
         "id": node_id,
         "type": "source",
-        "title": "Source",
+        "title": "On Run",
         "category": "source",
-        "config": {"eventType": "trigger_email"},
+        "config": {},
     };
 }
 

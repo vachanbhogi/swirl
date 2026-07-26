@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Navbar from './components/Navbar';
 import WhiteboardCard from './components/WhiteboardCard';
 import CodeBlockPalette from './components/CodeBlockPalette';
 import NodePropertiesPanel from './components/NodePropertiesPanel';
 import JacCodeViewer from './components/JacCodeViewer';
 import AIScreen from './components/AIScreen';
+import WorkflowsScreen from './components/WorkflowsScreen';
+import SaveWorkflowModal from './components/SaveWorkflowModal';
 import ExecutionInspector from './components/ExecutionInspector';
 import { INITIAL_NODES, INITIAL_EDGES } from './data/blockDefinitions';
 import { normalizeWorkflow } from './data/workflowNormalization';
@@ -12,9 +14,15 @@ import {
   compileWorkflowPrompt,
   executeWorkflow,
   generateJacSource,
+  saveWorkflow,
+  loadWorkflow,
+  listWorkflows,
+  deleteWorkflow,
   isTauriEnvironment,
   listenToWorkflowEvents
 } from './services/tauriBridge';
+
+const AUTO_SAVE_DELAY_MS = 2000;
 
 export default function App() {
   const initialWorkflow = normalizeWorkflow(INITIAL_NODES, INITIAL_EDGES);
@@ -28,8 +36,25 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [executionResults, setExecutionResults] = useState({});
   const [generatedCode, setGeneratedCode] = useState(null);
-  const [activeTab, setActiveTab] = useState('workflow'); // 'workflow' | 'ai'
+  const [activeTab, setActiveTab] = useState('workflow');
   const [showLogsInspector, setShowLogsInspector] = useState(false);
+
+  const [editingWorkflow, setEditingWorkflow] = useState(false);
+  const [currentWorkflowName, setCurrentWorkflowName] = useState(null);
+  const [savedWorkflows, setSavedWorkflows] = useState([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
+  const autoSaveTimerRef = useRef(null);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const currentNameRef = useRef(currentWorkflowName);
+
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+  currentNameRef.current = currentWorkflowName;
 
   useEffect(() => {
     let unlisten;
@@ -55,6 +80,125 @@ export default function App() {
     return () => { if (unlisten) unlisten(); };
   }, []);
 
+  const refreshWorkflowList = useCallback(async () => {
+    if (!isTauriEnvironment()) return;
+    try {
+      const list = await listWorkflows();
+      setSavedWorkflows(list || []);
+    } catch (err) {
+      console.error('[WorkflowManager] Failed to list workflows:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriEnvironment()) return;
+    (async () => {
+      try {
+        const list = await listWorkflows();
+        if (!list || list.length === 0) {
+          const workflow = normalizeWorkflow(INITIAL_NODES, INITIAL_EDGES);
+          await saveWorkflow('Starter Workflow', workflow);
+        }
+      } catch (err) {
+        console.error('[WorkflowManager] Failed to seed starter workflow:', err);
+      }
+    })();
+  }, []);
+
+  const performSave = useCallback(async (name, nodesToSave, edgesToSave) => {
+    if (!isTauriEnvironment() || !name) return;
+    setIsSaving(true);
+    try {
+      const workflow = normalizeWorkflow(nodesToSave, edgesToSave);
+      await saveWorkflow(name, workflow);
+      setHasUnsavedChanges(false);
+      setSaveError(null);
+      await refreshWorkflowList();
+    } catch (err) {
+      console.error('[WorkflowManager] Auto-save failed:', err);
+      setSaveError(`Autosave failed: ${err}`);
+      setLogs((prev) => [...prev, {
+        time: new Date().toLocaleTimeString(), type: 'error', prefix: 'save', message: `Save failed: ${err}`
+      }]);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [refreshWorkflowList, setLogs]);
+
+  useEffect(() => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (!currentWorkflowName) return;
+    setHasUnsavedChanges(true);
+    autoSaveTimerRef.current = setTimeout(() => {
+      performSave(currentNameRef.current, nodesRef.current, edgesRef.current);
+    }, AUTO_SAVE_DELAY_MS);
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  }, [nodes, edges, currentWorkflowName, performSave]);
+
+  useEffect(() => {
+    if (activeTab === 'workflow' && !editingWorkflow) refreshWorkflowList();
+  }, [activeTab, editingWorkflow, refreshWorkflowList]);
+
+  const handleNewWorkflow = () => {
+    const fresh = normalizeWorkflow(INITIAL_NODES, INITIAL_EDGES);
+    setNodes(fresh.nodes);
+    setEdges(fresh.edges);
+    setCurrentWorkflowName(null);
+    setHasUnsavedChanges(false);
+    setSaveError(null);
+    setSelectedNodeId(null);
+    setLogs([]);
+    setExecutionResults({});
+    setEditingWorkflow(true);
+  };
+
+  const handleLoadWorkflow = async (name) => {
+    try {
+      const record = await loadWorkflow(name);
+      if (!record?.workflow) throw new Error('Workflow record is empty.');
+      const loaded = normalizeWorkflow(record.workflow.nodes || [], record.workflow.edges || []);
+      setNodes(loaded.nodes);
+      setEdges(loaded.edges);
+      setCurrentWorkflowName(record.name);
+      setHasUnsavedChanges(false);
+      setSaveError(null);
+      setSelectedNodeId(null);
+      setLogs([]);
+      setExecutionResults({});
+      setEditingWorkflow(true);
+    } catch (err) {
+      setLogs((prev) => [...prev, {
+        time: new Date().toLocaleTimeString(), type: 'error', prefix: 'load', message: `Failed to load "${name}": ${err}`
+      }]);
+    }
+  };
+
+  const handleSaveWorkflowAs = async (name) => {
+    setShowSaveModal(false);
+    setCurrentWorkflowName(name);
+    await performSave(name, nodesRef.current, edgesRef.current);
+  };
+
+  const handleDeleteWorkflow = async (name) => {
+    try {
+      await deleteWorkflow(name);
+      if (currentWorkflowName === name) {
+        setCurrentWorkflowName(null);
+        setHasUnsavedChanges(false);
+      }
+      await refreshWorkflowList();
+    } catch (err) {
+      console.error('[WorkflowManager] Delete failed:', err);
+    }
+  };
+
+  const handleBackToManager = () => {
+    setEditingWorkflow(false);
+    setShowCodeView(false);
+    setShowLogsInspector(false);
+    setSelectedNodeId(null);
+  };
+
   const handleDropNewBlock = (blockDef, x, y) => {
     const newNode = {
       id: `node-${Date.now()}`,
@@ -62,8 +206,8 @@ export default function App() {
       title: blockDef.title,
       category: blockDef.category,
       jacNode: blockDef.jacNode || 'WorkflowBlock',
-      x: x || 250,
-      y: y || 180,
+      position: { x: x ?? 250, y: y ?? 180 },
+      customPrompt: '',
       config: { ...blockDef.config },
       status: 'idle'
     };
@@ -71,9 +215,14 @@ export default function App() {
     setSelectedNodeId(newNode.id);
   };
 
-  const handleSaveNodeConfig = (nodeId, newTitle, newConfig) => {
+  const handleSaveNodeConfig = (nodeId, newTitle, newConfig, customPrompt) => {
     setNodes((prev) =>
-      prev.map((n) => (n.id === nodeId ? { ...n, title: newTitle, config: newConfig } : n))
+      prev.map((n) => (n.id === nodeId ? {
+        ...n,
+        title: newTitle,
+        config: newConfig,
+        customPrompt: customPrompt ?? n.customPrompt
+      } : n))
     );
   };
 
@@ -81,8 +230,7 @@ export default function App() {
     const newNode = {
       ...node,
       id: `node-${Date.now()}`,
-      x: node.x + 40,
-      y: node.y + 40,
+      position: { x: node.position.x + 40, y: node.position.y + 40 },
       status: 'idle'
     };
     setNodes((prev) => [...prev, newNode]);
@@ -132,7 +280,7 @@ export default function App() {
       setNodes(workflow.nodes);
       setEdges(workflow.edges);
       setSelectedNodeId(null);
-      setActiveTab('workflow');
+      setEditingWorkflow(true);
       setLogs((prev) => [...prev, {
         time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${workflow.nodes.length} blocks from Jac LLM.`
       }]);
@@ -161,12 +309,13 @@ export default function App() {
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
 
-  const isWorkflowView = activeTab === 'workflow';
+  const isWorkflowTab = activeTab === 'workflow';
+  const showEditor = isWorkflowTab && editingWorkflow;
+  const showManager = isWorkflowTab && !editingWorkflow;
 
   return (
     <div className="h-screen w-screen flex flex-col relative overflow-hidden font-sans bg-black text-zinc-100 dark dark-theme">
-      {/* Top Navbar — visible on both screens for tab switching */}
-      <Navbar 
+      <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onRunWorkflow={handleRunWorkflow}
@@ -174,15 +323,18 @@ export default function App() {
         showLogsInspector={showLogsInspector}
         onToggleLogs={() => setShowLogsInspector((prev) => !prev)}
         logsCount={logs.length}
+        currentWorkflowName={currentWorkflowName}
+        hasUnsavedChanges={hasUnsavedChanges}
+        isSaving={isSaving}
+        saveError={saveError}
+        showBackButton={showEditor}
+        onBack={handleBackToManager}
       />
 
-      {/* Main Workspace Layout */}
-      {isWorkflowView ? (
-        /* Visual Workflow Canvas Screen */
+      {showEditor ? (
         <div className="flex-1 flex w-full h-full overflow-hidden p-3 gap-3 bg-black">
-          {/* Center Canvas Area */}
           <main className="flex-1 h-full relative flex flex-col rounded-2xl overflow-hidden border border-zinc-800 bg-black shadow-xl">
-            <WhiteboardCard 
+            <WhiteboardCard
               nodes={nodes}
               setNodes={setNodes}
               edges={edges}
@@ -198,10 +350,9 @@ export default function App() {
             />
           </main>
 
-          {/* Right Side: Building Blocks Palette / Node Inspector Panel */}
           <div className="h-full rounded-2xl overflow-hidden border border-zinc-800 shadow-sm shrink-0 bg-zinc-950">
             {selectedNode ? (
-              <NodePropertiesPanel 
+              <NodePropertiesPanel
                 selectedNode={selectedNode}
                 onSaveNodeConfig={handleSaveNodeConfig}
                 onDeleteNode={handleDeleteNode}
@@ -216,26 +367,33 @@ export default function App() {
             )}
           </div>
         </div>
+      ) : showManager ? (
+        <WorkflowsScreen
+          savedWorkflows={savedWorkflows}
+          currentWorkflowName={currentWorkflowName}
+          onNew={handleNewWorkflow}
+          onLoad={handleLoadWorkflow}
+          onDelete={handleDeleteWorkflow}
+          onRefresh={refreshWorkflowList}
+        />
       ) : (
-        /* Full Standalone AI Screen — no workflow chrome */
         <AIScreen 
           onGenerateFromPrompt={handleGenerateFromPrompt}
           isCompilingPrompt={isCompilingPrompt}
+          onSwitchToWorkflow={() => setActiveTab('workflow')}
         />
       )}
 
-      {/* Jac Code Drawer — workflow only */}
-      {isWorkflowView && showCodeView && (
-        <JacCodeViewer 
-          nodes={nodes} 
-          edges={edges} 
-          jacCode={generatedCode} 
-          onClose={() => handleCodeView(false)} 
+      {showEditor && showCodeView && (
+        <JacCodeViewer
+          nodes={nodes}
+          edges={edges}
+          jacCode={generatedCode}
+          onClose={() => handleCodeView(false)}
         />
       )}
 
-      {/* Floating Activity Inspector Overlay — workflow only */}
-      {isWorkflowView && (
+      {showEditor && (
         <ExecutionInspector
           isOpen={showLogsInspector}
           onClose={() => setShowLogsInspector(false)}
@@ -243,6 +401,14 @@ export default function App() {
           activeNode={selectedNode || nodes.find((node) => node.id === activeNodeId)}
           executionResults={executionResults}
           onClearLogs={() => { setLogs([]); setExecutionResults({}); }}
+        />
+      )}
+
+      {showSaveModal && (
+        <SaveWorkflowModal
+          onSave={handleSaveWorkflowAs}
+          onClose={() => setShowSaveModal(false)}
+          existingNames={savedWorkflows.map((w) => w.name)}
         />
       )}
     </div>

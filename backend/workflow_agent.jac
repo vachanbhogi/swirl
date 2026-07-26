@@ -10,6 +10,7 @@ obj BlockView {
     has title: str;
     has category: str;
     has config: dict = {};
+    has custom_prompt: str = "";
     has status: str = "idle";
     has output: dict = {};
 
@@ -20,6 +21,7 @@ obj BlockView {
             "title": self.title,
             "category": self.category,
             "config": self.config,
+            "customPrompt": self.custom_prompt,
             "status": self.status,
             "output": self.output,
         };
@@ -50,6 +52,7 @@ node WorkflowBlock {
     has title: str;
     has category: str;
     has config: dict = {};
+    has custom_prompt: str = "";
     has status: str = "idle";
     has output: dict = {};
 }
@@ -97,6 +100,7 @@ walker WorkflowExecutorWalker {
                 title=block.title,
                 category=block.category,
                 config=block.config,
+                custom_prompt=block.custom_prompt,
                 status=block.status,
                 output=block.output,
             )
@@ -175,7 +179,7 @@ walker PromptToWorkflowWalker {
 def prompt_to_ast(user_prompt: str) -> WorkflowAst by llm(
     temperature=0.1,
     max_tokens=1800,
-    system_prompt="Return a safe Swirl workflow graph with exactly one source node at the leftmost entry. Use source, ai, mac, mcp, logic, and output categories. The source config must contain eventType equal to trigger_email, trigger_file, or trigger_cron. Return connected nodes and edges only."
+    system_prompt="Return a safe Swirl workflow graph. Use trigger, ai, mac, mcp, logic, and output categories. Trigger nodes are output-only event sources; several triggers may connect to the same first action. The UI adds a fixed On Run starter. Return connected nodes and edges only."
 );
 sem prompt_to_ast = "Compile a natural-language desktop automation request into a connected Swirl workflow AST.";
 sem prompt_to_ast.user_prompt = "The user's requested automation, including triggers, transformations, tools, and outputs.";
@@ -204,12 +208,6 @@ def _node(
     normalized_title: str = title;
     normalized_category: str = category;
     normalized_config: dict = config;
-    if category == "trigger" {
-        normalized_type = "source";
-        normalized_title = "Source";
-        normalized_category = "source";
-        normalized_config = {"eventType": block_type} | config;
-    }
     return {
         "id": node_id,
         "type": normalized_type,
@@ -339,23 +337,24 @@ def instantiate_block(spec: dict) -> WorkflowBlock {
     title: str = str(spec.get("title", block_type));
     category: str = str(spec.get("category", ""));
     config: dict = spec.get("config", {}) as dict;
+    custom_prompt: str = str(spec.get("customPrompt", ""));
 
     if category == "source" {
-        return SourceBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return SourceBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "trigger" {
-        return TriggerBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return TriggerBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "ai" {
-        return LLMTransformBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return LLMTransformBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "mac" {
-        return MacAppBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return MacAppBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "mcp" {
-        return MCPToolBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return MCPToolBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "logic" {
-        return ConditionBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return ConditionBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "output" {
-        return OutputBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+        return OutputBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     }
-    return WorkflowBlock(id=node_id, block_type=block_type, title=title, category=category, config=config);
+    return WorkflowBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
 }
 
 
@@ -430,6 +429,7 @@ def plan_workflow(workflow: dict) -> list[dict] {
                 title=block.title,
                 category=block.category,
                 config=block.config,
+                custom_prompt=block.custom_prompt,
                 status=block.status,
                 output=block.output,
             ).to_dict()

@@ -62,6 +62,7 @@ def generate_jac_source(workflow: dict) -> str {
         declaration += "block_type=" + jac_string(str(spec.get("type", "unknown"))) + ", ";
         declaration += "title=" + jac_string(str(spec.get("title", node_id))) + ", ";
         declaration += "category=" + jac_string(category) + ", ";
+        declaration += "custom_prompt=" + jac_string(str(spec.get("customPrompt", ""))) + ", ";
         declaration += "config=" + jac_dict(spec.get("config", {}) as dict) + ");";
         lines.append(declaration);
         incoming[node_id] = 0;
