@@ -37,7 +37,7 @@ test "workflow planner follows graph topology" {
                 "type": "source",
                 "title": "Source",
                 "category": "source",
-                "config": {"eventType": "trigger_file"},
+                "config": {},
             },
         ],
         "edges": [{"id": "a-b", "source": "a", "target": "b"}],
@@ -56,7 +56,7 @@ test "workflow planner rejects cycles" {
                 "type": "source",
                 "title": "Source",
                 "category": "source",
-                "config": {"eventType": "trigger_email"},
+                "config": {},
             },
             {
                 "id": "b",
@@ -124,7 +124,7 @@ test "code generator emits SourceBlock graph" {
                 "type": "source",
                 "title": "Source",
                 "category": "source",
-                "config": {"eventType": "trigger_email"},
+                "config": {},
             },
             {
                 "id": "done",

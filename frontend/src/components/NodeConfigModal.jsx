@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { X, Settings, Save, Sparkles } from 'lucide-react';
-import { SOURCE_EVENTS } from '../data/workflowNormalization';
 
 export default function NodeConfigModal({ node, onSave, onClose }) {
   const [config, setConfig] = useState(node.config || {});
@@ -16,10 +15,6 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
   };
 
   const isSource = node.category === 'source';
-  const handleSourceEventChange = (eventType) => {
-    const defaults = SOURCE_EVENTS[eventType].config;
-    setConfig((prev) => ({ ...defaults, ...prev, eventType }));
-  };
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -62,24 +57,10 @@ export default function NodeConfigModal({ node, onSave, onClose }) {
           {/* Dynamic Configuration Fields */}
           <div className="space-y-3 pt-2">
             <h4 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider font-mono">
-              {isSource ? 'Trigger Event' : 'Configuration Keys'}
+              {isSource ? 'Manual Starter' : 'Configuration Keys'}
             </h4>
-            {isSource && (
-              <select
-                value={config.eventType || 'trigger_email'}
-                onChange={(e) => handleSourceEventChange(e.target.value)}
-                className="w-full bg-neutral-900 border border-orange-500/40 rounded-lg px-3 py-2 text-xs text-neutral-100 font-mono focus:outline-none focus:border-orange-400"
-              >
-                {Object.entries(SOURCE_EVENTS).map(([eventType, event]) => (
-                  <option key={eventType} value={eventType}>{event.title}</option>
-                ))}
-              </select>
-            )}
-
-            {Object.entries(config).filter(([key]) => (
-              !isSource ||
-              (key !== 'eventType' && !(config.eventType === 'trigger_email' && key === 'filterSubject'))
-            )).map(([key, val]) => (
+            {isSource && <p className="text-xs text-neutral-400">Starts when you click Run Workflow.</p>}
+            {!isSource && Object.entries(config).map(([key, val]) => (
               <div key={key}>
                 <label className="block text-[11px] font-mono text-neutral-400 mb-1">
                   {key}

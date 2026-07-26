@@ -10,15 +10,12 @@ import {
   Copy
 } from 'lucide-react';
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
-import { SOURCE_EVENTS } from '../data/workflowNormalization';
 
 const CATEGORY_BG_MAP = {
   source: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
-  trigger: 'bg-purple-500/10 border-purple-500/30 text-purple-400',
   ai: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
   mac: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400',
   mcp: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
-  logic: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400',
   output: 'bg-rose-500/10 border-rose-500/30 text-rose-400'
 };
 
@@ -26,9 +23,6 @@ const FRIENDLY_KEY_LABELS = {
   mailbox: '📥 Target Mailbox',
   filterSubject: '🔍 Filter Subject (optional)',
   checkIntervalSec: '⏱️ Check Every (seconds)',
-  cron: '📅 Schedule Pattern (Cron)',
-  timezone: '🌐 Timezone',
-  wakeWord: '🎙️ Voice Wake Word',
   prompt: '✨ AI Assistant Instructions',
   maxTokens: '📏 Response Detail Level',
   temperature: '🎨 AI Creativity (0 = Precise, 1 = Creative)',
@@ -42,8 +36,7 @@ const FRIENDLY_KEY_LABELS = {
   tool_name: '🛠️ Tool Function Name',
   channel: '💬 Slack Channel',
   webhookUrl: '🔗 Webhook URL',
-  watchPath: '📂 Watched Directory',
-  filePattern: '📄 File Pattern'
+  waitTimeoutSec: '⏳ Wait Timeout (seconds)'
 };
 
 export default function NodePropertiesPanel({
@@ -129,13 +122,6 @@ export default function NodePropertiesPanel({
     onSaveNodeConfig(selectedNode.id, title, config, value);
   };
 
-  const handleSourceEventChange = (eventType) => {
-    const defaults = SOURCE_EVENTS[eventType].config;
-    const updated = { ...defaults, ...config, eventType };
-    setConfig(updated);
-    onSaveNodeConfig(selectedNode.id, title, updated);
-  };
-
   return (
     <aside className="w-80 h-full bg-zinc-950 border-l border-zinc-800 p-5 flex flex-col justify-between overflow-y-auto select-none shrink-0 animate-slide-up">
       <div className="space-y-5">
@@ -188,24 +174,7 @@ export default function NodePropertiesPanel({
           <p className="mt-1 text-[10px] text-zinc-500">AI blocks use this as their instruction. Other blocks receive it in execution context.</p>
         </div>
 
-        {isSource && (
-          <div>
-            <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1 font-sans">
-              Trigger Event Type
-            </label>
-            <select
-              value={config.eventType || 'trigger_email'}
-              onChange={(e) => handleSourceEventChange(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-zinc-700 font-sans"
-            >
-              {Object.entries(SOURCE_EVENTS).map(([eventType, event]) => (
-                <option key={eventType} value={eventType}>
-                  {event.title}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {isSource && <p className="text-xs text-zinc-400">Starts immediately when you press Run Workflow.</p>}
 
         <div className="space-y-4 pt-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
@@ -213,8 +182,7 @@ export default function NodePropertiesPanel({
             <HelpCircle className="w-3.5 h-3.5 text-zinc-500" />
           </div>
 
-          {Object.entries(config)
-            .filter(([key]) => !isSource || key !== 'eventType')
+          {!isSource && Object.entries(config)
             .map(([key, val]) => {
               const label = FRIENDLY_KEY_LABELS[key] || key;
 

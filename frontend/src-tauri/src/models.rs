@@ -77,6 +77,11 @@ impl WorkflowDocument {
             return Err("Workflow exceeds the 500-node safety limit".into());
         }
 
+        let supported_blocks = [
+            "on_run", "source", "output", "mac_wait_email", "llm_summarize", "mac_notes", "mac_finder",
+            "mac_notification", "mac_terminal", "mcp_fetch", "mcp_fs", "mcp_search",
+            "output_slack",
+        ];
         let mut ids = HashSet::new();
         let source_count = self
             .nodes
@@ -89,6 +94,12 @@ impl WorkflowDocument {
             ));
         }
         for node in &self.nodes {
+            if !supported_blocks.contains(&node.block_type.as_str()) {
+                return Err(format!(
+                    "Unsupported legacy block type: {}. Remove it and use a supported block.",
+                    node.block_type
+                ));
+            }
             if node.id.trim().is_empty() {
                 return Err("Workflow node IDs cannot be empty".into());
             }
@@ -119,9 +130,9 @@ impl WorkflowDocument {
             if self
                 .nodes
                 .iter()
-                .any(|node| node.id == edge.target && (node.category == "source" || node.category == "trigger"))
+                .any(|node| node.id == edge.target && node.category == "source")
             {
-                return Err("On Run and trigger blocks cannot have incoming edges".into());
+                return Err("Source node cannot have incoming edges".into());
             }
             *indegree
                 .get_mut(edge.target.as_str())
@@ -154,7 +165,7 @@ impl WorkflowDocument {
             return Err("Workflow graph contains a cycle".into());
         }
         let roots = self.nodes.iter()
-            .filter(|node| node.category == "source" || node.category == "trigger")
+            .filter(|node| node.category == "source")
             .map(|node| node.id.as_str())
             .collect::<Vec<_>>();
         let mut reachable = roots.iter().copied().collect::<HashSet<_>>();
@@ -172,7 +183,7 @@ impl WorkflowDocument {
             }
         }
         if reachable.len() != self.nodes.len() {
-            return Err("Every workflow node must be reachable from On Run or a trigger".into());
+            return Err("Every workflow node must be reachable from Source".into());
         }
         Ok(())
     }
@@ -255,6 +266,25 @@ mod tests {
             .validate()
             .unwrap_err()
             .contains("references an unknown node"));
+    }
+
+    #[test]
+    fn rejects_removed_legacy_blocks() {
+        let workflow = WorkflowDocument {
+            nodes: vec![
+                node("start"),
+                WorkflowNode {
+                    block_type: "trigger_cron".into(),
+                    category: "trigger".into(),
+                    ..node("legacy")
+                },
+            ],
+            edges: vec![edge("start-legacy", "start", "legacy")],
+        };
+        assert!(workflow
+            .validate()
+            .unwrap_err()
+            .contains("Unsupported legacy block type: trigger_cron"));
     }
 
     #[test]

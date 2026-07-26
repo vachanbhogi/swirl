@@ -1,54 +1,5 @@
 export const SOURCE_ID = 'workflow-on-run';
 
-export const SOURCE_EVENTS = {
-  trigger_email: {
-    type: 'trigger_email',
-    title: 'On Email Received',
-    description: 'Start when any new message arrives in Apple Mail.',
-    config: { mailbox: 'Inbox', filterSubject: '', checkIntervalSec: 15, waitTimeoutSec: 0 }
-  },
-  trigger_cron: {
-    type: 'trigger_cron',
-    title: 'Repeat Schedule',
-    description: 'Start on a recurring cron schedule.',
-    config: { cron: '*/15 * * * *', timezone: 'America/Los_Angeles' }
-  },
-  trigger_voice: {
-    type: 'trigger_voice',
-    title: 'Voice Command',
-    description: 'Start when a voice command or wake word is spoken.',
-    config: { wakeWord: 'Hey Swirl', language: 'en-US', listenTimeoutSec: 10 }
-  },
-  trigger_webhook: {
-    type: 'trigger_webhook',
-    title: 'HTTP Webhook',
-    description: 'Start when an incoming HTTP payload is posted to an endpoint.',
-    config: { path: '/api/v1/webhook', method: 'POST', authRequired: false }
-  },
-  trigger_clipboard: {
-    type: 'trigger_clipboard',
-    title: 'Clipboard Listener',
-    description: 'Start when text is copied to the macOS clipboard.',
-    config: { watchText: true, minChars: 5 }
-  },
-  trigger_file: {
-    type: 'trigger_file',
-    title: 'On File Created',
-    description: 'Start when a file appears in the watched Finder folder.',
-    config: { watchPath: '~/Downloads', filePattern: '*' }
-  }
-};
-
-export const sourceConfig = (eventType = 'trigger_email', config = {}) => {
-  const normalizedEventType = SOURCE_EVENTS[eventType] ? eventType : 'trigger_email';
-  return {
-    eventType: normalizedEventType,
-    ...SOURCE_EVENTS[normalizedEventType].config,
-    ...config,
-    ...(normalizedEventType === 'trigger_email' ? { filterSubject: '' } : {})
-  };
-};
-
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 export function createSourceNode(_config = {}, x = 32, y = 140) {
@@ -86,8 +37,7 @@ function normalizeNode(node) {
 }
 
 /**
- * Makes every graph start with a fixed manual "On Run" block. Trigger blocks stay
- * intact: each is an output-only event source and several can feed one action.
+ * Makes every graph start with a fixed manual "On Run" block.
  */
 export function normalizeWorkflow(nodes = [], edges = []) {
   const inputNodes = clone(nodes || []);
@@ -119,11 +69,10 @@ export function normalizeWorkflow(nodes = [], edges = []) {
     .filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target) && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => ({ ...edge }));
 
-  // Make the manual starter reach unconnected action roots. Existing trigger
-  // connections are retained, including multiple triggers into one action.
+  // Make the manual starter reach every unconnected action root.
   const incomingTargets = new Set(rewiredEdges.map((edge) => edge.target));
   retainedNodes.forEach((node) => {
-    if (node.id !== SOURCE_ID && node.category !== 'trigger' && !incomingTargets.has(node.id) && !rewiredEdges.some((edge) => edge.source === SOURCE_ID && edge.target === node.id)) {
+    if (node.id !== SOURCE_ID && !incomingTargets.has(node.id) && !rewiredEdges.some((edge) => edge.source === SOURCE_ID && edge.target === node.id)) {
       rewiredEdges.push({ id: `edge-${SOURCE_ID}-${node.id}`, source: SOURCE_ID, target: node.id, sourcePort: 'event', targetPort: 'in' });
     }
   });

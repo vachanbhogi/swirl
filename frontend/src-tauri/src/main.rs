@@ -187,40 +187,9 @@ fn execute_node(
 ) -> Result<Value, MacActionResult> {
     match node.category.as_str() {
         "source" => {
-            let event_type = node
-                .config
-                .get("eventType")
-                .and_then(Value::as_str)
-                .unwrap_or("trigger_email");
-            if event_type == "trigger_email" {
-                let request = MacActionRequest {
-                    app: "Mail".into(),
-                    action: "wait_for_new_message".into(),
-                    params: node.config.clone(),
-                    approved: true,
-                };
-                let result = macos::execute(&request);
-                if !result.success {
-                    return Err(result);
-                }
-                let email = result.output.clone().unwrap_or(Value::Null);
-                context.insert("email".into(), email.clone());
-                context.insert(
-                    "text".into(),
-                    email.get("content").cloned().unwrap_or(Value::Null),
-                );
-                let output = json!({
-                    "status": "triggered",
-                    "triggerType": event_type,
-                    "email": email
-                });
-                context.insert("trigger".into(), output.clone());
-                context.insert("triggerType".into(), Value::String(event_type.into()));
-                return Ok(output);
-            }
             let output = json!({
-                "status": "triggered",
-                "triggerType": event_type,
+                "status": "started",
+                "triggerType": "manual",
                 "timestampMs": std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|duration| duration.as_millis())
@@ -228,23 +197,7 @@ fn execute_node(
                 "payload": node.config
             });
             context.insert("trigger".into(), output.clone());
-            context.insert("triggerType".into(), Value::String(event_type.into()));
-            context.insert(
-                "text".into(),
-                Value::String(format!("Swirl source event: {event_type}")),
-            );
-            Ok(output)
-        }
-        "trigger" => {
-            let output = json!({
-                "status": "triggered",
-                "triggerType": node.block_type,
-                "timestampMs": std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_millis())
-                    .unwrap_or(0)
-            });
-            context.insert("trigger".into(), output.clone());
+            context.insert("triggerType".into(), Value::String("manual".into()));
             Ok(output)
         }
         "ai" => {
@@ -360,6 +313,14 @@ fn execute_node(
             };
             let result = macos::execute(&request);
             if result.success {
+                if node.block_type == "mac_wait_email" {
+                    let email = result.output.clone().unwrap_or(Value::Null);
+                    context.insert("email".into(), email.clone());
+                    context.insert(
+                        "text".into(),
+                        email.get("content").cloned().unwrap_or(Value::Null),
+                    );
+                }
                 Ok(serde_json::to_value(result).unwrap_or(Value::Null))
             } else {
                 Err(result)

@@ -5,11 +5,7 @@
       "type": "source",
       "title": "Source",
       "category": "source",
-      "config": {
-        "eventType": "trigger_file",
-        "watchPath": "~/Desktop",
-        "filePattern": "*"
-      }
+      "config": {}
     },
     {
       "id": "node-2",

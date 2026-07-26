@@ -62,14 +62,6 @@ Returns the list of all available block categories in the system.
 def BLOCK_CATEGORIES() -> list[BlockCategory] {
     return [
         BlockCategory(
-            id="trigger", 
-            name="Triggers", 
-            color="#8B5CF6", 
-            bg="rgba(139, 92, 246, 0.15)", 
-            border="#A78BFA", 
-            icon="Zap"
-        ),
-        BlockCategory(
             id="ai", 
             name="AI & LLM Transforms", 
             color="#F59E0B", 
@@ -94,14 +86,6 @@ def BLOCK_CATEGORIES() -> list[BlockCategory] {
             icon="Plug"
         ),
         BlockCategory(
-            id="logic", 
-            name="Control Logic", 
-            color="#6366F1", 
-            bg="rgba(99, 102, 241, 0.15)", 
-            border="#818CF8", 
-            icon="GitBranch"
-        ),
-        BlockCategory(
             id="output", 
             name="Outputs & Alerts", 
             color="#F43F5E", 
@@ -121,74 +105,6 @@ Returns the definitive list of all block configurations available in the engine.
 """
 def BLOCK_LIBRARY() -> list[BlockDefinition] {
     return [
-        # --- Triggers ---
-        BlockDefinition(
-            type="trigger_email",
-            category="trigger",
-            title="On Email Received",
-            subtitle="Apple Mail / Webhook Event",
-            description="Triggers when any new email arrives",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["text", "sender", "subject"],
-            config={"mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15}
-        ),
-        BlockDefinition(
-            type="trigger_cron",
-            category="trigger",
-            title="Cron Schedule",
-            subtitle="Timed Event Walker",
-            description="Triggers workflow on a recurring cron interval",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["timestamp"],
-            config={"cron": "*/15 * * * *", "timezone": "America/Los_Angeles"}
-        ),
-        BlockDefinition(
-            type="trigger_voice",
-            category="trigger",
-            title="Voice Command",
-            subtitle="Microphone / Whisper Trigger",
-            description="Triggers on custom spoken voice phrase",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["transcript", "confidence"],
-            config={"wakeWord": "Hey Swirl", "language": "en-US", "listenTimeoutSec": 10}
-        ),
-        BlockDefinition(
-            type="trigger_webhook",
-            category="trigger",
-            title="HTTP Webhook",
-            subtitle="REST Endpoint Listener",
-            description="Triggers when an incoming HTTP POST request is received",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["payload", "headers"],
-            config={"path": "/api/v1/webhook", "method": "POST", "authRequired": False}
-        ),
-        BlockDefinition(
-            type="trigger_clipboard",
-            category="trigger",
-            title="Clipboard Listener",
-            subtitle="macOS Pasteboard Watcher",
-            description="Triggers when new text or image is copied to clipboard",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["clipboardText", "contentType"],
-            config={"watchText": True, "minChars": 5}
-        ),
-        BlockDefinition(
-            type="trigger_file",
-            category="trigger",
-            title="On File Created",
-            subtitle="Finder Watcher",
-            description="Triggers when a file is added to a Mac folder",
-            jac_node="TriggerBlock",
-            inputs=[],
-            outputs=["filePath", "fileName", "fileExt"],
-            config={"watchPath": "~/Downloads", "filePattern": "*"}
-        ),
-
         # --- AI Transforms ---
         BlockDefinition(
             type="llm_summarize",
@@ -201,30 +117,18 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             outputs=["summary", "actionItems"],
             config={"prompt": "Summarize concisely and extract 3 bullet action items.", "maxTokens": 500, "temperature": 0.2}
         ),
-        BlockDefinition(
-            type="llm_extract",
-            category="ai",
-            title="LLM Entity Extractor",
-            subtitle="Structured Data Extraction",
-            description="Extract dates, names, prices, and JSON schemas from text",
-            jac_node="LLMTransformBlock",
-            inputs=["text"],
-            outputs=["entities", "jsonData"],
-            config={"extractSchema": "{\"names\": [], \"dates\": [], \"priority\": \"high|medium|low\"}"}
-        ),
-        BlockDefinition(
-            type="llm_classifier",
-            category="ai",
-            title="LLM Intent Classifier",
-            subtitle="Multi-Branch Classifier",
-            description="Classify text into categories for downstream logic",
-            jac_node="LLMTransformBlock",
-            inputs=["text"],
-            outputs=["category", "confidence"],
-            config={"categories": ["Urgent Request", "Billing Inquiry", "General Feedback", "Spam"]}
-        ),
-
         # --- macOS Automations ---
+        BlockDefinition(
+            type="mac_wait_email",
+            category="mac",
+            title="Wait for Email",
+            subtitle="Apple Mail Message Wait",
+            description="Wait for a new Apple Mail message after the workflow starts",
+            jac_node="MacAppBlock",
+            inputs=[],
+            outputs=["text", "sender", "subject"],
+            config={"app": "Mail", "action": "wait_for_new_message", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0}
+        ),
         BlockDefinition(
             type="mac_notes",
             category="mac",
@@ -303,19 +207,6 @@ def BLOCK_LIBRARY() -> list[BlockDefinition] {
             inputs=["query"],
             outputs=["searchResults", "sources"],
             config={"server": "brave-search-mcp", "tool_name": "brave_web_search", "query": "", "maxResults": 5}
-        ),
-
-        # --- Logic Blocks ---
-        BlockDefinition(
-            type="logic_if",
-            category="logic",
-            title="If / Else Branch",
-            subtitle="Conditional Control Flow",
-            description="Branch walker execution based on boolean condition",
-            jac_node="ConditionBlock",
-            inputs=["value"],
-            outputs=["truePath", "falsePath"],
-            config={"operator": "contains", "matchString": "Urgent"}
         ),
 
         # --- Output Blocks ---
@@ -407,99 +298,6 @@ def workflow_presets() -> list[WorkflowPreset] {
             description="Monitors incoming emails, runs LLM summary walker, saves note and notifies Mac desktop.",
             nodes=starter["nodes"],
             edges=starter["edges"]
-        ),
-        WorkflowPreset(
-            id="desktop_cleaner",
-            name="📁 Desktop Organizer & Slack Alert",
-            description="Monitors ~/Desktop folder, categorizes files by extension using Finder block, sends Slack summary.",
-            nodes=[
-                {
-                    "id": "node-d1", 
-                    "type": "trigger_file", 
-                    "title": "On File Created", 
-                    "category": "trigger", 
-                    "x": 60, 
-                    "y": 140, 
-                    "config": {"watchPath": "~/Desktop", "filePattern": "*"}, 
-                    "status": "idle"
-                },
-                {
-                    "id": "node-d2", 
-                    "type": "mac_finder", 
-                    "title": "Finder File Manager", 
-                    "category": "mac", 
-                    "x": 420, 
-                    "y": 140, 
-                    "config": {"app": "Finder", "action": "organize_by_extension", "targetDirectory": "~/Desktop"}, 
-                    "status": "idle"
-                },
-                {
-                    "id": "node-d3", 
-                    "type": "output_slack", 
-                    "title": "Slack Webhook", 
-                    "category": "output", 
-                    "x": 780, 
-                    "y": 140, 
-                    "config": {"channel": "#desktop-bot", "webhookUrl": "https://hooks.slack.com/..."}, 
-                    "status": "idle"
-                }
-            ],
-            edges=[
-                {"id": "edge-d1-d2", "source": "node-d1", "target": "node-d2", "sourcePort": "filePath", "targetPort": "filePath"},
-                {"id": "edge-d2-d3", "source": "node-d2", "target": "node-d3", "sourcePort": "movedPath", "targetPort": "text"}
-            ]
-        ),
-        WorkflowPreset(
-            id="mcp_scraper",
-            name="🌐 MCP Web Scraper & AI Digest",
-            description="Uses stdio MCP web fetcher tool, feeds markdown into Jac LLM walker, creates Apple Note.",
-            nodes=[
-                {
-                    "id": "node-m1", 
-                    "type": "trigger_cron", 
-                    "title": "Cron Schedule", 
-                    "category": "trigger", 
-                    "x": 60, 
-                    "y": 140, 
-                    "config": {"cron": "0 9 * * *", "timezone": "America/Los_Angeles"}, 
-                    "status": "idle"
-                },
-                {
-                    "id": "node-m2", 
-                    "type": "mcp_fetch", 
-                    "title": "MCP Web Scraper", 
-                    "category": "mcp", 
-                    "x": 420, 
-                    "y": 140, 
-                    "config": {"server": "fetch-mcp-server", "tool_name": "fetch", "url": "https://example.com"},
-                    "status": "idle"
-                },
-                {
-                    "id": "node-m3", 
-                    "type": "llm_summarize", 
-                    "title": "LLM Summarizer", 
-                    "category": "ai", 
-                    "x": 780, 
-                    "y": 140, 
-                    "config": {"prompt": "Extract key news headlines and bullet points.", "maxTokens": 400}, 
-                    "status": "idle"
-                },
-                {
-                    "id": "node-m4", 
-                    "type": "mac_notes", 
-                    "title": "Apple Notes", 
-                    "category": "mac", 
-                    "x": 1140, 
-                    "y": 140, 
-                    "config": {"app": "Notes", "action": "create_note", "folder": "Daily Digests"}, 
-                    "status": "idle"
-                }
-            ],
-            edges=[
-                {"id": "edge-m1-m2", "source": "node-m1", "target": "node-m2", "sourcePort": "timestamp", "targetPort": "url"},
-                {"id": "edge-m2-m3", "source": "node-m2", "target": "node-m3", "sourcePort": "markdownContent", "targetPort": "text"},
-                {"id": "edge-m3-m4", "source": "node-m3", "target": "node-m4", "sourcePort": "summary", "targetPort": "text"}
-            ]
         )
     ];
 }

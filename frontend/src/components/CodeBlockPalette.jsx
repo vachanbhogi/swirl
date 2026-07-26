@@ -3,7 +3,7 @@ import { Plus, Zap, Play, Sparkles, Command, Plug, GitBranch, Send, ArrowRight }
 import { BLOCK_LIBRARY } from '../data/blockDefinitions';
 
 export default function CodeBlockPalette({ onAddBlock }) {
-  const [activeTab, setActiveTab] = useState('triggers'); // 'triggers' | 'actions'
+  const [activeTab, setActiveTab] = useState('actions');
 
   const handleDragStart = (e, blockType) => {
     e.dataTransfer.setData('application/swirl-block', JSON.stringify(blockType));
@@ -11,9 +11,7 @@ export default function CodeBlockPalette({ onAddBlock }) {
   };
 
   const filteredBlocks = BLOCK_LIBRARY.filter((block) => {
-    if (activeTab === 'triggers') {
-      return block.category === 'trigger';
-    }
+    if (activeTab === 'triggers') return block.category === 'trigger';
     return block.category !== 'trigger' && block.category !== 'source';
   });
 
@@ -32,7 +30,6 @@ export default function CodeBlockPalette({ onAddBlock }) {
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           </div>
 
-          {/* Triggers vs Actions Segmented Selector */}
           <div className="grid grid-cols-2 gap-1.5 p-1 mt-3.5 bg-zinc-900 border border-zinc-800 rounded-xl">
             <button
               onClick={() => setActiveTab('triggers')}
@@ -48,7 +45,6 @@ export default function CodeBlockPalette({ onAddBlock }) {
                 {BLOCK_LIBRARY.filter((b) => b.category === 'trigger').length}
               </span>
             </button>
-
             <button
               onClick={() => setActiveTab('actions')}
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition font-sans ${

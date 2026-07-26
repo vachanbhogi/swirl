@@ -59,11 +59,9 @@ node WorkflowBlock {
 
 
 node SourceBlock(WorkflowBlock) {}
-node TriggerBlock(WorkflowBlock) {}
 node LLMTransformBlock(WorkflowBlock) {}
 node MacAppBlock(WorkflowBlock) {}
 node MCPToolBlock(WorkflowBlock) {}
-node ConditionBlock(WorkflowBlock) {}
 node OutputBlock(WorkflowBlock) {}
 
 
@@ -112,10 +110,6 @@ walker WorkflowExecutorWalker {
         self.record(here);
     }
 
-    can execute_trigger with TriggerBlock entry {
-        self.record(here);
-    }
-
     can execute_llm with LLMTransformBlock entry {
         self.record(here);
     }
@@ -129,10 +123,6 @@ walker WorkflowExecutorWalker {
             f"[Swirl][Jac][MCP] server='{here.config.get('server', '')}' "
             f"tool='{here.config.get('tool_name', '')}'"
         );
-        self.record(here);
-    }
-
-    can execute_condition with ConditionBlock entry {
         self.record(here);
     }
 
@@ -179,7 +169,7 @@ walker PromptToWorkflowWalker {
 def prompt_to_ast(user_prompt: str) -> WorkflowAst by llm(
     temperature=0.1,
     max_tokens=1800,
-    system_prompt="Return a safe Swirl workflow graph. Use trigger, ai, mac, mcp, logic, and output categories. Trigger nodes are output-only event sources; several triggers may connect to the same first action. The UI adds a fixed On Run starter. Return connected nodes and edges only."
+    system_prompt="Return a safe Swirl workflow graph. Use only ai, mac, mcp, and output categories. The UI adds a fixed manual On Run starter. Use mac_wait_email for Apple Mail waiting and return connected nodes and edges only."
 );
 sem prompt_to_ast = "Compile a natural-language desktop automation request into a connected Swirl workflow AST.";
 sem prompt_to_ast.user_prompt = "The user's requested automation, including triggers, transformations, tools, and outputs.";
@@ -236,11 +226,9 @@ def _edge(edge_id: str, source: str, target: str) -> dict {
 def block_class_for(category: str) -> str {
     classes: dict[str, str] = {
         "source": "SourceBlock",
-        "trigger": "TriggerBlock",
         "ai": "LLMTransformBlock",
         "mac": "MacAppBlock",
         "mcp": "MCPToolBlock",
-        "logic": "ConditionBlock",
         "output": "OutputBlock",
     };
     return classes.get(category, "WorkflowBlock");
@@ -255,8 +243,8 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
 
     if "email" in lowered or "mail" in lowered {
         nodes = [
-            _node("node-p1", "trigger_email", "On Email Received", "trigger", 80, 140, {
-                "mailbox": "Inbox", "filterSubject": ""
+            _node("node-p1", "mac_wait_email", "Wait for Email", "mac", 80, 140, {
+                "app": "Mail", "action": "wait_for_new_message", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0
             }),
             _node("node-p2", "llm_summarize", "LLM Summarizer", "ai", 440, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
@@ -275,14 +263,11 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
         ];
     } elif "desktop" in lowered or "finder" in lowered or "organize" in lowered {
         nodes = [
-            _node("node-p1", "trigger_file", "On File Created", "trigger", 80, 140, {
-                "watchPath": "~/Desktop", "filePattern": "*"
-            }),
-            _node("node-p2", "mac_finder", "Finder File Manager", "mac", 440, 140, {
+            _node("node-p1", "mac_finder", "Finder File Manager", "mac", 440, 140, {
                 "app": "Finder", "action": "organize_by_extension",
                 "targetDirectory": "~/Desktop"
             }),
-            _node("node-p3", "mac_notes", "Apple Notes", "mac", 800, 140, {
+            _node("node-p2", "mac_notes", "Apple Notes", "mac", 800, 140, {
                 "app": "Notes", "action": "create_note",
                 "folder": "Swirl Automations",
                 "defaultTitle": "Desktop Organization Report"
@@ -290,41 +275,19 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
         ];
         edges = [
             _edge("edge-p1-p2", "node-p1", "node-p2"),
-            _edge("edge-p2-p3", "node-p2", "node-p3"),
-        ];
-    } elif "calendar" in lowered or "meeting" in lowered or "event" in lowered {
-        nodes = [
-            _node("node-p1", "trigger_cron", "Cron Schedule", "trigger", 80, 140, {
-                "cron": "0 9 * * *", "timezone": "America/Los_Angeles"
-            }),
-            _node("node-p2", "llm_extract", "LLM Entity Extractor", "ai", 440, 140, {
-                "prompt": prompt,
-                "extractSchema": "{\"title\":\"\",\"start\":\"\",\"end\":\"\"}"
-            }),
-            _node("node-p3", "mac_calendar", "Apple Calendar", "mac", 800, 140, {
-                "app": "Calendar", "action": "create_event"
-            }),
-        ];
-        edges = [
-            _edge("edge-p1-p2", "node-p1", "node-p2"),
-            _edge("edge-p2-p3", "node-p2", "node-p3"),
         ];
     } else {
         nodes = [
-            _node("node-p1", "trigger_cron", "Cron Schedule", "trigger", 80, 140, {
-                "cron": "0 * * * *", "timezone": "America/Los_Angeles"
-            }),
-            _node("node-p2", "mcp_fetch", "MCP Web Scraper", "mcp", 440, 140, {
+            _node("node-p1", "mcp_fetch", "MCP Web Scraper", "mcp", 440, 140, {
                 "server": "fetch-mcp-server", "tool_name": "fetch",
                 "url": "https://example.com"
             }),
-            _node("node-p3", "llm_summarize", "LLM Summarizer", "ai", 800, 140, {
+            _node("node-p2", "llm_summarize", "LLM Summarizer", "ai", 800, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
             }),
         ];
         edges = [
             _edge("edge-p1-p2", "node-p1", "node-p2"),
-            _edge("edge-p2-p3", "node-p2", "node-p3"),
         ];
     }
     return WorkflowAst(nodes=nodes, edges=edges, source="rules");
@@ -341,16 +304,12 @@ def instantiate_block(spec: dict) -> WorkflowBlock {
 
     if category == "source" {
         return SourceBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
-    } elif category == "trigger" {
-        return TriggerBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "ai" {
         return LLMTransformBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "mac" {
         return MacAppBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "mcp" {
         return MCPToolBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
-    } elif category == "logic" {
-        return ConditionBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     } elif category == "output" {
         return OutputBlock(id=node_id, block_type=block_type, title=title, category=category, config=config, custom_prompt=custom_prompt);
     }

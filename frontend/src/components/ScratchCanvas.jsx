@@ -209,7 +209,7 @@ export default function ScratchCanvas({
 
         const isRunning = activeNodeId === node.id;
         const isSelected = selectedNodeId === node.id;
-        const isOutputOnly = node.category === 'trigger' || node.category === 'source';
+        const isOutputOnly = node.category === 'source';
 
         return (
           <div
@@ -236,7 +236,7 @@ export default function ScratchCanvas({
               onMouseUp={(e) => handlePortMouseUp(e, node.id, 'out', true)}
               onMouseDown={(e) => handlePortMouseDown(e, node.id, 'out', true)}
               className="block-port absolute -right-2 top-[38px] z-20 shadow-md"
-              title={node.category === 'trigger' ? 'Trigger output' : 'Output Connect Port'}
+              title="Output Connect Port"
             />
 
             {/* Block Header */}
