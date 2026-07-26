@@ -1,11 +1,14 @@
 import React from 'react';
-import { Play, Layers, Sparkles, Terminal, ArrowLeft, Loader2, CircleAlert } from 'lucide-react';
+import { Play, Layers, Sparkles, Square, Terminal, ArrowLeft, Loader2, CircleAlert } from 'lucide-react';
 
 export default function Navbar({
   activeTab = 'workflow',
   setActiveTab,
   onRunWorkflow,
+  onStopWorkflow,
   isExecuting,
+  isStopping,
+  activeRunMode,
   showLogsInspector,
   onToggleLogs,
   logsCount = 0,
@@ -91,18 +94,24 @@ export default function Navbar({
           <span>Logs ({logsCount})</span>
         </button>
 
-        <button
-          onClick={onRunWorkflow}
-          disabled={isExecuting}
-          className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-xs font-bold transition font-sans ${
-            isExecuting
-              ? 'bg-zinc-800 text-zinc-500 cursor-wait'
-              : 'bg-white text-zinc-900 hover:bg-zinc-200 shadow-sm active:scale-95'
-          }`}
-        >
-          <Play className={`w-3.5 h-3.5 fill-current ${isExecuting ? 'animate-spin' : ''}`} />
-          <span>{isExecuting ? 'Executing...' : 'Run Workflow'}</span>
-        </button>
+        {isExecuting ? (
+          <button
+            onClick={onStopWorkflow}
+            disabled={isStopping}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-xl text-xs font-bold transition font-sans bg-rose-950/60 text-rose-200 border border-rose-800/70 hover:bg-rose-900/60 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Square className="w-3.5 h-3.5 fill-current" />
+            <span>{isStopping ? 'Stopping…' : `Stop ${activeRunMode === 'continuous' ? 'Listener' : 'Workflow'}`}</span>
+          </button>
+        ) : (
+          <button
+            onClick={onRunWorkflow}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-xl text-xs font-bold transition font-sans bg-white text-zinc-900 hover:bg-zinc-200 shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Run Workflow</span>
+          </button>
+        )}
       </div>
     </header>
   );

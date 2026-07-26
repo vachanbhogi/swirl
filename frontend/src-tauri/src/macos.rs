@@ -4,6 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +145,15 @@ fn mail_target(mailbox: &str) -> String {
 }
 
 fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
+    let cancelled = AtomicBool::new(false);
+    wait_for_new_email_cancellable(params, risk, &cancelled)
+}
+
+pub fn wait_for_new_email_cancellable(
+    params: &Value,
+    risk: &str,
+    cancelled: &AtomicBool,
+) -> MacActionResult {
     let mailbox = string_param(params, "mailbox", "Inbox");
     let interval = params
         .get("checkIntervalSec")
@@ -154,6 +164,9 @@ fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
         .get("waitTimeoutSec")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let subject_filter = string_param(params, "filterSubject", "")
+        .trim()
+        .to_ascii_lowercase();
     let baseline = match mail_snapshot(&mailbox) {
         Ok(ids) => ids,
         Err(error) => return MacActionResult::failure(error, risk),
@@ -161,7 +174,15 @@ fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
     println!("[Swirl][Source] waiting for any new email in '{}'", mailbox);
     let started = std::time::Instant::now();
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(interval));
+        for _ in 0..interval {
+            if cancelled.load(Ordering::Relaxed) {
+                return MacActionResult::failure("Workflow stopped", risk);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        if cancelled.load(Ordering::Relaxed) {
+            return MacActionResult::failure("Workflow stopped", risk);
+        }
         let current = match mail_snapshot(&mailbox) {
             Ok(ids) => ids,
             Err(error) => return MacActionResult::failure(error, risk),
@@ -175,6 +196,10 @@ fn wait_for_new_email(params: &Value, risk: &str) -> MacActionResult {
                 .get("subject")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            if !subject_filter.is_empty() && !subject.to_ascii_lowercase().contains(&subject_filter)
+            {
+                continue;
+            }
             println!("[Swirl][Source] new email received: {}", subject);
             return MacActionResult::success(details, risk);
         }

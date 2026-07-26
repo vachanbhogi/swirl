@@ -12,14 +12,15 @@ import { INITIAL_NODES, INITIAL_EDGES } from './data/blockDefinitions';
 import { normalizeWorkflow } from './data/workflowNormalization';
 import {
   compileWorkflowPrompt,
-  executeWorkflow,
   generateJacSource,
   saveWorkflow,
   loadWorkflow,
   listWorkflows,
   deleteWorkflow,
   isTauriEnvironment,
-  listenToWorkflowEvents
+  listenToWorkflowEvents,
+  startWorkflow,
+  stopWorkflow
 } from './services/tauriBridge';
 
 const AUTO_SAVE_DELAY_MS = 2000;
@@ -33,11 +34,15 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [showCodeView, setShowCodeView] = useState(false);
   const [isCompilingPrompt, setIsCompilingPrompt] = useState(false);
+  const [compileStatus, setCompileStatus] = useState({ type: 'idle', message: '' });
+  const [activeRun, setActiveRun] = useState(null);
+  const [isStopping, setIsStopping] = useState(false);
   const [logs, setLogs] = useState([]);
   const [executionResults, setExecutionResults] = useState({});
   const [generatedCode, setGeneratedCode] = useState(null);
   const [activeTab, setActiveTab] = useState('workflow');
   const [showLogsInspector, setShowLogsInspector] = useState(false);
+  const terminalRunIds = useRef(new Set());
 
   const [editingWorkflow, setEditingWorkflow] = useState(false);
   const [currentWorkflowName, setCurrentWorkflowName] = useState(null);
@@ -75,6 +80,24 @@ export default function App() {
       }
       if (event.event === 'node_complete' && event.nodeId) {
         setExecutionResults((prev) => ({ ...prev, [event.nodeId]: event.output }));
+      }
+      if (event.event === 'triggered' && event.nodeId) {
+        setExecutionResults((prev) => ({ ...prev, [event.nodeId]: event.output }));
+      }
+      if (event.event === 'complete' && event.output) {
+        setExecutionResults(event.output.results || {});
+      }
+      if (['complete', 'failed', 'stopped'].includes(event.event)) {
+        if (event.runId) terminalRunIds.current.add(event.runId);
+        setActiveRun((current) => {
+          if (!current || !event.runId || current.runId === event.runId) {
+            setIsExecuting(false);
+            setIsStopping(false);
+            setActiveNodeId(null);
+            return null;
+          }
+          return current;
+        });
       }
     }).then((cleanup) => { unlisten = cleanup; });
     return () => { if (unlisten) unlisten(); };
@@ -256,23 +279,45 @@ export default function App() {
       const workflow = normalizeWorkflow(nodes, edges);
       setNodes(workflow.nodes);
       setEdges(workflow.edges);
-      const summary = await executeWorkflow(workflow);
-      setExecutionResults(summary.results || {});
-      setNodes((prev) => prev.map((node) => (
-        summary.completedNodeIds?.includes(node.id) ? { ...node, status: 'success' } : node
-      )));
+      setNodes((prev) => prev.map((node) => ({ ...node, status: 'idle', output: {} })));
+      const started = await startWorkflow(workflow);
+      if (terminalRunIds.current.has(started.runId)) {
+        terminalRunIds.current.delete(started.runId);
+        setIsExecuting(false);
+      } else {
+        setActiveRun(started);
+      }
+      setLogs((prev) => [...prev, {
+        time: new Date().toLocaleTimeString(),
+        type: 'info',
+        prefix: 'armed',
+        message: `${started.runMode === 'continuous' ? 'Continuous' : 'One-time'} workflow ${started.runId} started.`
+      }]);
     } catch (error) {
       setLogs((prev) => [...prev, {
         time: new Date().toLocaleTimeString(), type: 'error', prefix: 'error', message: error.message
       }]);
-    } finally {
       setIsExecuting(false);
       setActiveNodeId(null);
     }
   };
 
+  const handleStopWorkflow = async () => {
+    if (!activeRun?.runId || isStopping) return;
+    setIsStopping(true);
+    try {
+      await stopWorkflow(activeRun.runId);
+    } catch (error) {
+      setIsStopping(false);
+      setLogs((prev) => [...prev, {
+        time: new Date().toLocaleTimeString(), type: 'error', prefix: 'stop', message: error.message
+      }]);
+    }
+  };
+
   const handleGenerateFromPrompt = async (prompt) => {
     setIsCompilingPrompt(true);
+    setCompileStatus({ type: 'compiling', message: 'Jac is translating your description into a validated workflow…' });
     try {
       const result = await compileWorkflowPrompt(prompt, true);
       if (!result?.nodes) throw new Error('Jac compiler returned no workflow graph.');
@@ -281,10 +326,16 @@ export default function App() {
       setEdges(workflow.edges);
       setSelectedNodeId(null);
       setEditingWorkflow(true);
+      setActiveTab('workflow');
+      setCompileStatus({ type: 'success', message: `Generated ${workflow.nodes.length} connected blocks.` });
       setLogs((prev) => [...prev, {
         time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${workflow.nodes.length} blocks from Jac LLM.`
       }]);
     } catch (error) {
+      setCompileStatus({
+        type: 'error',
+        message: error?.message || 'Jac could not generate a valid workflow. Check the provider configuration and try again.'
+      });
       setLogs((prev) => [...prev, {
         time: new Date().toLocaleTimeString(), type: 'error', prefix: 'compile', message: error.message
       }]);
@@ -319,7 +370,10 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onRunWorkflow={handleRunWorkflow}
+        onStopWorkflow={handleStopWorkflow}
         isExecuting={isExecuting}
+        isStopping={isStopping}
+        activeRunMode={activeRun?.runMode}
         showLogsInspector={showLogsInspector}
         onToggleLogs={() => setShowLogsInspector((prev) => !prev)}
         logsCount={logs.length}
@@ -381,6 +435,7 @@ export default function App() {
           onGenerateFromPrompt={handleGenerateFromPrompt}
           isCompilingPrompt={isCompilingPrompt}
           onSwitchToWorkflow={() => setActiveTab('workflow')}
+          compileStatus={compileStatus}
         />
       )}
 

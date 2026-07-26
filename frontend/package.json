@@ -7,6 +7,7 @@
     "dev": "vite",
     "vite": "vite",
     "build": "vite build",
+    "test": "node --test src/**/*.test.js",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

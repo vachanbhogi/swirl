@@ -400,6 +400,10 @@ pub struct WorkflowExecutionRequest {
 pub struct ExecutionEvent {
     pub event: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub node_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,

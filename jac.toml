@@ -9,7 +9,7 @@ jac-version = "==0.34.7"
 [dependencies]
 
 [byllm.model]
-default_model = "gpt-4o-mini"
+default_model = "nvidia_nim/meta/llama-3.3-70b-instruct"
 
 [dev-dependencies]
 watchdog = ">=3.0.0"

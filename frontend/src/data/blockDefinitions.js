@@ -179,7 +179,14 @@ export const INITIAL_NODES = [
     jacNode: 'SourceBlock',
     x: 60,
     y: 120,
-    config: {},
+    config: {
+      eventType: 'trigger_email',
+      runMode: 'once',
+      mailbox: 'Inbox',
+      filterSubject: '',
+      checkIntervalSec: 15,
+      waitTimeoutSec: 0
+    },
     status: 'idle'
   },
 ];

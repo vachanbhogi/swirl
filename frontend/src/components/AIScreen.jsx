@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Sparkles, ArrowRight, Wand2, Loader2, Bot, Cpu, ArrowLeft } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Wand2, Loader2, Bot, Cpu, ArrowLeft, Sparkles } from 'lucide-react';
 
 const PRESET_PROMPTS = [
   {
     title: 'Email & Notes Summarizer',
     icon: '📧',
-    description: 'Check unread emails, summarize key action items with Jac AI, and save a report in Apple Notes.',
-    prompt: 'Check unread emails in my inbox every morning, summarize key points using AI, create a note in Apple Notes, and send a Mac notification.'
+    description: 'Wait for incoming email, summarize key action items with Jac AI, and save a report in Apple Notes.',
+    prompt: 'Whenever a new email arrives in my inbox, summarize its key points using AI, create a note in Apple Notes, and send a Mac notification.'
   },
   {
     title: 'File Organizer & MCP Extractor',
@@ -15,17 +15,18 @@ const PRESET_PROMPTS = [
     prompt: 'Watch my Downloads folder for new files, use MCP tool to categorize documents, move invoices to Invoices folder, and log results.'
   },
   {
-    title: 'Daily Calendar Briefing',
+    title: 'Daily Web Briefing',
     icon: '⏰',
-    description: 'Retrieve upcoming calendar events and deliver a daily morning notification schedule.',
-    prompt: 'Every day at 8:00 AM, query Apple Calendar for todays events, summarize my schedule using Jac AI, and send a notification.'
+    description: 'Fetch a web page on a morning schedule, summarize it, and deliver a Mac notification.',
+    prompt: 'Every day at 8:00 AM, fetch https://example.com with MCP, summarize the page using Jac AI, and send a Mac notification.'
   }
 ];
 
 export default function AIScreen({
   onGenerateFromPrompt,
   isCompilingPrompt,
-  onSwitchToWorkflow
+  onSwitchToWorkflow,
+  compileStatus = { type: 'idle', message: '' }
 }) {
   const [promptText, setPromptText] = useState('');
 
@@ -49,7 +50,7 @@ export default function AIScreen({
           {/* Hero */}
           <div className="space-y-4">
             <div className="flex items-center justify-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500/20 to-indigo-500/20 border border-purple-500/20 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
                 <Bot className="w-5 h-5 text-purple-400" />
               </div>
             </div>
@@ -63,25 +64,27 @@ export default function AIScreen({
 
           {/* Prompt Input */}
           <form onSubmit={handleSubmit} className="w-full space-y-4">
-            <div className="relative rounded-3xl bg-zinc-950 border border-zinc-800 p-5 shadow-2xl focus-within:border-purple-500/50 transition-all group">
+            <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 p-5 focus-within:border-purple-500/60 transition-colors group">
               <textarea
                 rows={4}
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
                 placeholder="e.g. Every morning, check my unread emails, summarize the key points with AI, and save the summary as a note in Apple Notes..."
-                className="w-full bg-transparent text-white text-sm placeholder-zinc-500 focus:outline-none resize-none leading-relaxed"
+                aria-label="Describe the workflow to generate"
+                aria-describedby={compileStatus.message ? 'ai-builder-status' : undefined}
+                className="w-full bg-transparent text-white text-sm placeholder-zinc-400 focus:outline-none resize-none leading-relaxed"
               />
 
               <div className="flex items-center justify-between pt-3 border-t border-zinc-900">
                 <div className="flex items-center gap-2 text-[11px] text-zinc-600 font-mono">
                   <Cpu className="w-3 h-3" />
-                  <span>Jaclang LLM Walkers</span>
+                  <span>Jac LLM · NVIDIA NIM</span>
                 </div>
 
                 <button
                   type="submit"
                   disabled={!promptText.trim() || isCompilingPrompt}
-                  className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-bold transition shadow-lg ${
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                     !promptText.trim() || isCompilingPrompt
                       ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                       : 'bg-white text-zinc-950 hover:bg-zinc-200 active:scale-95'
@@ -101,6 +104,29 @@ export default function AIScreen({
                 </button>
               </div>
             </div>
+            {compileStatus.message && (
+              <div
+                id="ai-builder-status"
+                role={compileStatus.type === 'error' ? 'alert' : 'status'}
+                aria-live="polite"
+                className={`flex items-start gap-2 rounded-xl px-3 py-2.5 text-left text-xs border ${
+                  compileStatus.type === 'error'
+                    ? 'bg-rose-950/35 border-rose-800/60 text-rose-200'
+                    : compileStatus.type === 'success'
+                      ? 'bg-emerald-950/30 border-emerald-800/60 text-emerald-200'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-300'
+                }`}
+              >
+                {compileStatus.type === 'error' ? (
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                ) : compileStatus.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                ) : (
+                  <Loader2 className="w-4 h-4 shrink-0 mt-0.5 animate-spin" />
+                )}
+                <span className="leading-relaxed">{compileStatus.message}</span>
+              </div>
+            )}
           </form>
 
           {/* Starter Templates */}
@@ -114,8 +140,9 @@ export default function AIScreen({
                 <button
                   key={idx}
                   type="button"
+                  disabled={isCompilingPrompt}
                   onClick={() => handleSelectPreset(preset.prompt)}
-                  className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/60 transition text-left space-y-3 group shadow-sm flex flex-col justify-between"
+                  className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/60 transition text-left space-y-3 group flex flex-col justify-between disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
                 >
                   <div>
                     <div className="flex items-center gap-2 mb-2">

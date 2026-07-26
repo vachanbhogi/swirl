@@ -10,6 +10,7 @@ import {
   Copy
 } from 'lucide-react';
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
+import { changeSourceEvent, SOURCE_EVENTS } from '../data/workflowNormalization';
 
 const CATEGORY_BG_MAP = {
   source: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
@@ -23,6 +24,13 @@ const FRIENDLY_KEY_LABELS = {
   mailbox: '📥 Target Mailbox',
   filterSubject: '🔍 Filter Subject (optional)',
   checkIntervalSec: '⏱️ Check Every (seconds)',
+  waitTimeoutSec: '⌛ Stop Waiting After (seconds, 0 = never)',
+  runMode: '🔁 Run Mode',
+  cron: '📅 Schedule Pattern (Cron)',
+  timezone: '🌐 Timezone',
+  wakeWord: '🎙️ Voice Wake Word',
+  language: '🗣️ Recognition Language',
+  listenTimeoutSec: '⌛ Whisper Poll Timeout (seconds)',
   prompt: '✨ AI Assistant Instructions',
   maxTokens: '📏 Response Detail Level',
   temperature: '🎨 AI Creativity (0 = Precise, 1 = Creative)',
@@ -36,7 +44,16 @@ const FRIENDLY_KEY_LABELS = {
   tool_name: '🛠️ Tool Function Name',
   channel: '💬 Slack Channel',
   webhookUrl: '🔗 Webhook URL',
-  waitTimeoutSec: '⏳ Wait Timeout (seconds)'
+  watchPath: '📂 Watched Directory',
+  filePattern: '📄 File Pattern',
+  host: '🌐 Listener Host',
+  port: '🔌 Listener Port',
+  path: '↪ Webhook Path',
+  method: 'HTTP Method',
+  authRequired: '🔒 Require Bearer Token',
+  authToken: '🔑 Bearer Token',
+  watchText: '📋 Watch Text',
+  minChars: 'Minimum Characters'
 };
 
 export default function NodePropertiesPanel({
@@ -122,6 +139,12 @@ export default function NodePropertiesPanel({
     onSaveNodeConfig(selectedNode.id, title, config, value);
   };
 
+  const handleSourceEventChange = (eventType) => {
+    const updated = changeSourceEvent(eventType, config);
+    setConfig(updated);
+    onSaveNodeConfig(selectedNode.id, title, updated);
+  };
+
   return (
     <aside className="w-80 h-full bg-zinc-950 border-l border-zinc-800 p-5 flex flex-col justify-between overflow-y-auto select-none shrink-0 animate-slide-up">
       <div className="space-y-5">
@@ -192,7 +215,25 @@ export default function NodePropertiesPanel({
                     {label}
                   </label>
 
-                  {typeof val === 'number' ? (
+                  {isSource && key === 'runMode' ? (
+                    <select
+                      value={val}
+                      onChange={(e) => handleFieldChange(key, e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-zinc-600"
+                    >
+                      <option value="once">Once — stop after one event</option>
+                      <option value="continuous">Continuous — re-arm until stopped</option>
+                    </select>
+                  ) : typeof val === 'number' && isSource ? (
+                    <input
+                      type="number"
+                      min={key === 'waitTimeoutSec' ? 0 : 1}
+                      max={key === 'port' ? 65535 : undefined}
+                      value={val}
+                      onChange={(e) => handleFieldChange(key, Number(e.target.value))}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600"
+                    />
+                  ) : typeof val === 'number' ? (
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
