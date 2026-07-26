@@ -40,6 +40,22 @@ export default function Navbar({
             <span>Code</span>
           </button>
 
+          <button
+            onClick={async () => {
+              try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                await invoke('toggle_notch');
+              } catch (e) {
+                console.log('Toggle notch error:', e);
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition"
+            title="Toggle Notch (Ctrl + Opt + Cmd + Space)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Notch</span>
+          </button>
+
           {onClearCanvas && (
             <button
               onClick={onClearCanvas}
