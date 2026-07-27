@@ -19,6 +19,12 @@ export const SOURCE_EVENTS = {
     description: 'Start when a voice command or wake word is spoken.',
     config: { wakeWord: 'Hey Swirl', language: 'en-US', listenTimeoutSec: 30 }
   },
+  trigger_sms: {
+    type: 'trigger_sms',
+    title: 'Text Myself',
+    description: 'Start when a new Messages text involves the configured phone number.',
+    config: { phoneNumber: '8604644276', checkIntervalSec: 1 }
+  },
   trigger_webhook: {
     type: 'trigger_webhook',
     title: 'HTTP Webhook',

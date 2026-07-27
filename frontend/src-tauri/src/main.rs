@@ -461,6 +461,7 @@ fn validate_generated_catalog(workflow: &WorkflowDocument) -> Result<(), String>
         "trigger_clipboard",
         "trigger_webhook",
         "trigger_voice",
+        "trigger_sms",
     ];
     const BLOCKS: &[(&str, &str)] = &[
         ("llm_summarize", "ai"),
@@ -767,6 +768,7 @@ fn start_workflow(
         let source = planned_nodes.first().expect("Source checked before spawn");
         let mut iteration = 1_u64;
         let mut terminal_event = "stopped";
+        let mut source_state = triggers::SourceState::default();
         loop {
             if cancelled.load(Ordering::Relaxed) {
                 break;
@@ -795,30 +797,31 @@ fn start_workflow(
                 ),
             );
 
-            let source_event = match triggers::wait_for_source(source, &cancelled) {
-                Ok(Some(value)) => value,
-                Ok(None) => break,
-                Err(error) => {
-                    terminal_event = "failed";
-                    eprintln!(
-                        "[Swirl][Workflow][{}] Source failed: {}",
-                        thread_run_id, error
-                    );
-                    emit(
-                        &thread_app,
-                        run_event(
-                            "failed",
-                            &thread_run_id,
-                            iteration,
-                            Some(source),
-                            Some("error"),
-                            Some(error),
-                            None,
-                        ),
-                    );
-                    break;
-                }
-            };
+            let source_event =
+                match triggers::wait_for_source(source, &cancelled, &mut source_state) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => break,
+                    Err(error) => {
+                        terminal_event = "failed";
+                        eprintln!(
+                            "[Swirl][Workflow][{}] Source failed: {}",
+                            thread_run_id, error
+                        );
+                        emit(
+                            &thread_app,
+                            run_event(
+                                "failed",
+                                &thread_run_id,
+                                iteration,
+                                Some(source),
+                                Some("error"),
+                                Some(error),
+                                None,
+                            ),
+                        );
+                        break;
+                    }
+                };
             let source_output = source_event.output();
             println!(
                 "[Swirl][Workflow][{}] Source triggered: {}",

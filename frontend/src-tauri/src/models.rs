@@ -78,8 +78,18 @@ impl WorkflowDocument {
         }
 
         let supported_blocks = [
-            "on_run", "source", "output", "mac_wait_email", "llm_summarize", "mac_notes", "mac_finder",
-            "mac_notification", "mac_terminal", "mcp_fetch", "mcp_fs", "mcp_search",
+            "on_run",
+            "source",
+            "output",
+            "mac_wait_email",
+            "llm_summarize",
+            "mac_notes",
+            "mac_finder",
+            "mac_notification",
+            "mac_terminal",
+            "mcp_fetch",
+            "mcp_fs",
+            "mcp_search",
             "output_slack",
         ];
         let mut ids = HashSet::new();
@@ -164,7 +174,9 @@ impl WorkflowDocument {
         if queue.len() != self.nodes.len() {
             return Err("Workflow graph contains a cycle".into());
         }
-        let roots = self.nodes.iter()
+        let roots = self
+            .nodes
+            .iter()
             .filter(|node| node.category == "source")
             .map(|node| node.id.as_str())
             .collect::<Vec<_>>();

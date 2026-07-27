@@ -1,4 +1,5 @@
 use crate::{macos, models::WorkflowNode};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
@@ -6,10 +7,15 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+#[derive(Debug, Default)]
+pub struct SourceState {
+    sms_after_row_id: Option<i64>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SourceEvent {
@@ -365,6 +371,278 @@ fn wait_for_voice(
     Ok(None)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageRow {
+    row_id: i64,
+    guid: String,
+    text: String,
+    attributed_body_hex: String,
+    message_date: i64,
+    is_from_me: i64,
+    service: String,
+    sender: String,
+    chat_identifier: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RowId {
+    row_id: i64,
+}
+
+fn normalize_phone_number(value: &str) -> Result<String, String> {
+    let mut digits = value
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+    if digits.len() == 11 && digits.starts_with('1') {
+        digits.remove(0);
+    }
+    if !(7..=15).contains(&digits.len()) {
+        return Err("SMS phone number must contain 7 to 15 digits".into());
+    }
+    Ok(digits)
+}
+
+fn messages_database_path() -> Result<PathBuf, String> {
+    let path = expand_home("~/Library/Messages/chat.db")?;
+    fs::metadata(&path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::PermissionDenied => format!(
+            "Swirl cannot read {}. Give Swirl Full Disk Access in System Settings > Privacy & Security > Full Disk Access, then restart it",
+            path.display()
+        ),
+        std::io::ErrorKind::NotFound => format!(
+            "Messages history was not found at {}. Sign in to Messages on this Mac first",
+            path.display()
+        ),
+        _ => format!("Cannot access {}: {error}", path.display()),
+    })?;
+    Ok(path)
+}
+
+fn sqlite_json_query<T: for<'de> Deserialize<'de>>(
+    database_path: &Path,
+    query: &str,
+) -> Result<Vec<T>, String> {
+    let output = Command::new("/usr/bin/sqlite3")
+        .args(["-readonly", "-json"])
+        .arg(database_path)
+        .arg(query)
+        .output()
+        .map_err(|error| format!("Cannot start the Messages database reader: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.to_ascii_lowercase().contains("authorization denied")
+            || detail.to_ascii_lowercase().contains("permission denied")
+        {
+            return Err(
+                "Swirl cannot read Messages. Give Swirl Full Disk Access in System Settings > Privacy & Security > Full Disk Access, then restart it"
+                    .into(),
+            );
+        }
+        return Err(format!("Messages database query failed: {detail}"));
+    }
+    if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Vec::new());
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Messages database returned malformed data: {error}"))
+}
+
+fn phone_match_sql(column: &str, phone_number: &str) -> String {
+    format!(
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({column}, ''), '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE '%{phone_number}'"
+    )
+}
+
+fn latest_sms_row_id(database_path: &Path, phone_number: &str) -> Result<i64, String> {
+    let chat_matches = phone_match_sql("c.chat_identifier", phone_number);
+    let sender_matches = phone_match_sql("sender.id", phone_number);
+    let participant_matches = phone_match_sql("participant.id", phone_number);
+    let query = format!(
+        "SELECT COALESCE(MAX(m.ROWID), 0) AS rowId
+         FROM message m
+         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+         JOIN chat c ON c.ROWID = cmj.chat_id
+         LEFT JOIN handle sender ON sender.ROWID = m.handle_id
+         WHERE {chat_matches}
+            OR {sender_matches}
+            OR EXISTS (
+                SELECT 1
+                FROM chat_handle_join chj
+                JOIN handle participant ON participant.ROWID = chj.handle_id
+                WHERE chj.chat_id = c.ROWID AND {participant_matches}
+            )"
+    );
+    Ok(sqlite_json_query::<RowId>(database_path, &query)?
+        .first()
+        .map(|row| row.row_id)
+        .unwrap_or(0))
+}
+
+fn next_sms_message(
+    database_path: &Path,
+    phone_number: &str,
+    after_row_id: i64,
+) -> Result<Option<MessageRow>, String> {
+    let chat_matches = phone_match_sql("c.chat_identifier", phone_number);
+    let sender_matches = phone_match_sql("sender.id", phone_number);
+    let participant_matches = phone_match_sql("participant.id", phone_number);
+    let query = format!(
+        "SELECT DISTINCT
+             m.ROWID AS rowId,
+             COALESCE(m.guid, '') AS guid,
+             COALESCE(m.text, '') AS text,
+             hex(COALESCE(m.attributedBody, x'')) AS attributedBodyHex,
+             COALESCE(m.date, 0) AS messageDate,
+             COALESCE(m.is_from_me, 0) AS isFromMe,
+             COALESCE(m.service, '') AS service,
+             COALESCE(sender.id, '') AS sender,
+             COALESCE(c.chat_identifier, '') AS chatIdentifier
+         FROM message m
+         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+         JOIN chat c ON c.ROWID = cmj.chat_id
+         LEFT JOIN handle sender ON sender.ROWID = m.handle_id
+         WHERE m.ROWID > {after_row_id}
+           AND (
+                {chat_matches}
+                OR {sender_matches}
+                OR EXISTS (
+                    SELECT 1
+                    FROM chat_handle_join chj
+                    JOIN handle participant ON participant.ROWID = chj.handle_id
+                    WHERE chj.chat_id = c.ROWID AND {participant_matches}
+                )
+           )
+           AND (COALESCE(m.text, '') <> '' OR m.attributedBody IS NOT NULL)
+         ORDER BY m.ROWID ASC
+         LIMIT 1"
+    );
+    Ok(sqlite_json_query::<MessageRow>(database_path, &query)?
+        .into_iter()
+        .next())
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
+    if !value.len().is_multiple_of(2) {
+        return Err("Messages attributed body contained malformed hexadecimal data".into());
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let encoded = std::str::from_utf8(pair).map_err(|error| error.to_string())?;
+            u8::from_str_radix(encoded, 16).map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+fn plutil(blob: &[u8], arguments: &[&str]) -> Result<Vec<u8>, String> {
+    let mut child = Command::new("/usr/bin/plutil")
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Cannot start the Messages text decoder: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "Messages text decoder has no input stream".to_string())?
+        .write_all(blob)
+        .map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn attributed_string_object_index(dump: &str) -> Option<usize> {
+    dump.lines()
+        .find(|line| line.contains("\"NSString\" =>") || line.contains("\"NS.string\" =>"))
+        .and_then(|line| line.split("{value = ").nth(1))
+        .and_then(|value| value.split('}').next())
+        .and_then(|value| value.trim().parse::<usize>().ok())
+}
+
+fn decode_attributed_body(encoded: &str) -> Result<Option<String>, String> {
+    if encoded.is_empty() {
+        return Ok(None);
+    }
+    let blob = decode_hex(encoded)?;
+    let dump = plutil(&blob, &["-p", "--", "-"])?;
+    let dump = String::from_utf8_lossy(&dump);
+    let Some(index) = attributed_string_object_index(&dump) else {
+        return Ok(None);
+    };
+    let key_path = format!("$objects.{index}");
+    let decoded = plutil(&blob, &["-extract", &key_path, "raw", "-o", "-", "--", "-"])?;
+    let text = String::from_utf8_lossy(&decoded).trim().to_string();
+    Ok((!text.is_empty()).then_some(text))
+}
+
+fn wait_for_sms(
+    node: &WorkflowNode,
+    cancelled: &AtomicBool,
+    state: &mut SourceState,
+) -> Result<Option<SourceEvent>, String> {
+    let configured_number = string_config(node, "phoneNumber", "8604644276");
+    let phone_number = normalize_phone_number(&configured_number)?;
+    let interval = node
+        .config
+        .get("checkIntervalSec")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .clamp(1, 60);
+    let database_path = messages_database_path()?;
+    if state.sms_after_row_id.is_none() {
+        state.sms_after_row_id = Some(latest_sms_row_id(&database_path, &phone_number)?);
+    }
+    println!(
+        "[Swirl][Source] waiting for a new Messages text involving '{}'",
+        phone_number
+    );
+    loop {
+        if !sleep_interruptible(cancelled, Duration::from_secs(interval)) {
+            return Ok(None);
+        }
+        let after_row_id = state.sms_after_row_id.unwrap_or(0);
+        let Some(message) = next_sms_message(&database_path, &phone_number, after_row_id)? else {
+            continue;
+        };
+        state.sms_after_row_id = Some(message.row_id);
+        let body = if message.text.trim().is_empty() {
+            decode_attributed_body(&message.attributed_body_hex)?
+        } else {
+            Some(message.text)
+        };
+        let Some(body) = body.filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+        return Ok(Some(SourceEvent {
+            trigger_type: "trigger_sms".into(),
+            timestamp_ms: now_ms(),
+            payload: json!({
+                "phoneNumber": phone_number,
+                "messageGuid": message.guid,
+                "messageDate": message.message_date,
+                "isFromMe": message.is_from_me != 0,
+                "direction": if message.is_from_me != 0 { "sent" } else { "received" },
+                "service": message.service,
+                "sender": message.sender,
+                "chatIdentifier": message.chat_identifier,
+                "text": body
+            }),
+            text: body,
+        }));
+    }
+}
+
 type ParsedHttpRequest = (String, String, Vec<(String, String)>, String);
 
 fn parse_http_request(bytes: &[u8]) -> Result<ParsedHttpRequest, String> {
@@ -467,6 +745,7 @@ fn wait_for_webhook(
 pub fn wait_for_source(
     node: &WorkflowNode,
     cancelled: &AtomicBool,
+    state: &mut SourceState,
 ) -> Result<Option<SourceEvent>, String> {
     match node
         .config
@@ -480,6 +759,7 @@ pub fn wait_for_source(
         "trigger_clipboard" => wait_for_clipboard(node, cancelled),
         "trigger_webhook" => wait_for_webhook(node, cancelled),
         "trigger_voice" => wait_for_voice(node, cancelled),
+        "trigger_sms" => wait_for_sms(node, cancelled, state),
         event_type => Err(format!("Unsupported Source event type: {event_type}")),
     }
 }
@@ -510,5 +790,68 @@ mod tests {
         assert_eq!(method, "POST");
         assert_eq!(path, "/hook");
         assert_eq!(body, "{\"ok\":true}");
+    }
+
+    #[test]
+    fn phone_numbers_are_normalized_and_validated() {
+        assert_eq!(
+            normalize_phone_number("+1 (860) 464-4276").unwrap(),
+            "8604644276"
+        );
+        assert!(normalize_phone_number("123").is_err());
+    }
+
+    #[test]
+    fn attributed_messages_decode_to_plain_text() {
+        let archive = "62706c6973743030d4010203040506070a582476657273696f6e592461726368697665725424746f7058246f626a6563747312000186a05f100f4e534b657965644172636869766572d1080954726f6f748001a60b0c13141a2055246e756c6cd30d0e0f101112584e53537472696e675624636c6173735c4e53417474726962757465738002800580035f100f68656c6c6f2073656c662074657874d315160e171819574e532e6b6579735a4e532e6f626a65637473a0a08004d21b1c1d1e5a24636c6173736e616d655824636c61737365735c4e5344696374696f6e617279a21d1f584e534f626a656374d21b1c21225f10124e5341747472696275746564537472696e67a2231f5f10124e5341747472696275746564537472696e6700080011001a00240029003200370049004c00510053005a0060006700700077008400860088008a009c00a300ab00b600b700b800ba00bf00ca00d300e000e300ec00f101060109000000000000020100000000000000240000000000000000000000000000011e";
+        assert_eq!(
+            decode_attributed_body(archive).unwrap().as_deref(),
+            Some("hello self text")
+        );
+    }
+
+    #[test]
+    fn messages_query_filters_by_configured_phone_number() {
+        let database_path = std::env::temp_dir().join(format!(
+            "swirl-messages-{}-{}.db",
+            std::process::id(),
+            now_ms()
+        ));
+        let schema = "
+            CREATE TABLE message (
+                ROWID INTEGER PRIMARY KEY, guid TEXT, text TEXT,
+                attributedBody BLOB, date INTEGER, is_from_me INTEGER,
+                service TEXT, handle_id INTEGER
+            );
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+            INSERT INTO handle VALUES (1, '+18604644276');
+            INSERT INTO handle VALUES (2, '+14155550100');
+            INSERT INTO chat VALUES (1, '+18604644276');
+            INSERT INTO chat VALUES (2, '+14155550100');
+            INSERT INTO message VALUES (10, 'match', 'run my workflow', NULL, 1, 1, 'iMessage', 1);
+            INSERT INTO message VALUES (11, 'other', 'ignore me', NULL, 2, 1, 'iMessage', 2);
+            INSERT INTO chat_message_join VALUES (1, 10);
+            INSERT INTO chat_message_join VALUES (2, 11);
+            INSERT INTO chat_handle_join VALUES (1, 1);
+            INSERT INTO chat_handle_join VALUES (2, 2);
+        ";
+        let status = Command::new("/usr/bin/sqlite3")
+            .arg(&database_path)
+            .arg(schema)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        assert_eq!(latest_sms_row_id(&database_path, "8604644276").unwrap(), 10);
+        let message = next_sms_message(&database_path, "8604644276", 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(message.guid, "match");
+        assert_eq!(message.text, "run my workflow");
+
+        fs::remove_file(database_path).unwrap();
     }
 }

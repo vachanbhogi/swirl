@@ -25,6 +25,18 @@ test "prompt compiler creates connected desktop workflow" {
 }
 
 
+test "prompt compiler creates continuous self-text source" {
+    ast = prompt_to_workflow_rules(
+        "When I text myself, run the workflow from what I say"
+    );
+    assert ast.nodes[0]["category"] == "source";
+    assert ast.nodes[0]["config"]["eventType"] == "trigger_sms";
+    assert ast.nodes[0]["config"]["runMode"] == "continuous";
+    assert ast.nodes[0]["config"]["phoneNumber"] == "8604644276";
+    assert ast.edges[0]["source"] == "workflow-source";
+}
+
+
 test "workflow planner follows graph topology" {
     workflow = {
         "nodes": [
@@ -74,6 +86,28 @@ test "typed LLM draft becomes a canonical source workflow" {
     assert ast.nodes[0]["config"]["runMode"] == "continuous";
     assert ast.nodes[0]["config"]["port"] == 9000;
     assert ast.nodes[1]["type"] == "mac_notes";
+}
+
+
+test "typed LLM draft applies self-text source defaults" {
+    draft = WorkflowDraft(
+        source_event_type="trigger_sms",
+        nodes=[
+            WorkflowNodeDraft(
+                id="notify", block_type="mac_notification",
+                title="Notify"
+            )
+        ],
+        edges=[
+            WorkflowEdgeDraft(source="workflow-source", target="notify")
+        ],
+    );
+    ast = workflow_draft_to_ast(
+        "Whenever I text myself, notify me", draft
+    );
+    assert ast.nodes[0]["config"]["eventType"] == "trigger_sms";
+    assert ast.nodes[0]["config"]["phoneNumber"] == "8604644276";
+    assert ast.nodes[0]["config"]["checkIntervalSec"] == 1;
 }
 
 

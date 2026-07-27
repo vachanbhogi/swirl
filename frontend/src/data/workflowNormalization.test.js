@@ -31,6 +31,13 @@ test('event changes retain run mode and apply event-specific configuration', () 
   }
 });
 
+test('self-text source is configured for the requested number', () => {
+  assert.deepEqual(SOURCE_EVENTS.trigger_sms.config, {
+    phoneNumber: '8604644276',
+    checkIntervalSec: 1
+  });
+});
+
 test('legacy triggers migrate and reconnect downstream nodes', () => {
   const workflow = normalizeWorkflow(
     [

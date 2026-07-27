@@ -35,6 +35,19 @@ Voice Source workflows long-poll the teammate-owned local Whisper service at
 `{"wakeWord","language","timeoutSec"}` and returns
 `{"transcript","timestampMs","confidence"}`; HTTP 204 or 408 means no event yet.
 
+The Text Myself Source is configured for `8604644276`. It watches the local
+Messages history only after the workflow is armed and passes each new message
+body into the graph as `text`. Before using it:
+
+1. Sign in to Messages on the Mac and enable message syncing.
+2. In System Settings > Privacy & Security > Full Disk Access, enable Swirl
+   (or the terminal that launches `npm run tauri:dev` during development).
+3. Restart Swirl, select Source > Text Myself, choose Continuous, and run the
+   workflow before sending the text.
+
+No SMS provider or paid messaging number is used. Swirl reads the Messages
+database locally and never sends a reply automatically.
+
 ## Validate the backend
 
 ```bash

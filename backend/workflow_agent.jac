@@ -196,7 +196,7 @@ def prompt_to_draft(user_prompt: str) -> WorkflowDraft by llm(
     max_tokens=2400,
     system_prompt="""Build a connected Swirl desktop workflow from the request.
 Choose exactly one source_event_type from: trigger_email, trigger_file,
-trigger_cron, trigger_clipboard, trigger_webhook, trigger_voice.
+trigger_cron, trigger_clipboard, trigger_webhook, trigger_voice, trigger_sms.
 Choose downstream block_type values only from: llm_summarize, llm_extract,
 llm_classifier, mac_notes, mac_finder, mac_notification, mac_terminal,
 mcp_fetch, mcp_fs, mcp_search, logic_if, output_slack.
@@ -219,7 +219,8 @@ Source configuration fields: email {mailbox,filterSubject,checkIntervalSec};
 file {watchPath,filePattern,checkIntervalSec}; cron {cron,timezone};
 clipboard {watchText,minChars,checkIntervalSec}; webhook
 {host:"127.0.0.1",port,path,method:"POST",authRequired}; voice
-{wakeWord,language,listenTimeoutSec}.
+{wakeWord,language,listenTimeoutSec}; sms
+{phoneNumber:"8604644276",checkIntervalSec}.
 Use run_mode continuous for whenever/monitor/watch/listen/every-time requests,
 once for next/once/single-event requests, and once when ambiguous."""
 );
@@ -348,6 +349,9 @@ def _source_defaults(event_type: str) -> dict {
         "trigger_voice": {
             "wakeWord": "Hey Swirl", "language": "en-US",
             "listenTimeoutSec": 30
+        },
+        "trigger_sms": {
+            "phoneNumber": "8604644276", "checkIntervalSec": 1
         },
     };
     if event_type not in defaults {
@@ -502,10 +506,28 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
     nodes: list[dict] = [];
     edges: list[dict] = [];
 
-    if "email" in lowered or "mail" in lowered {
+    if (
+        "sms" in lowered or "text myself" in lowered
+        or "text message" in lowered
+    ) {
         nodes = [
-            _node("node-p1", "mac_wait_email", "Wait for Email", "mac", 80, 140, {
-                "app": "Mail", "action": "wait_for_new_message", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0
+            _node("workflow-source", "source", "Source", "source", 32, 140, {
+                "eventType": "trigger_sms", "runMode": "continuous",
+                "phoneNumber": "8604644276", "checkIntervalSec": 1
+            }),
+            _node("node-p1", "mac_notification", "Mac Notification", "mac", 440, 140, {
+                "app": "System", "action": "display_notification", "sound": "Glass"
+            }),
+        ];
+        edges = [
+            _edge("edge-source-p1", "workflow-source", "node-p1"),
+        ];
+    } elif "email" in lowered or "mail" in lowered {
+        nodes = [
+            _node("workflow-source", "source", "Source", "source", 32, 140, {
+                "eventType": "trigger_email", "runMode": _run_mode(prompt),
+                "mailbox": "Inbox", "filterSubject": "",
+                "checkIntervalSec": 15, "waitTimeoutSec": 0
             }),
             _node("node-p2", "llm_summarize", "LLM Summarizer", "ai", 440, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
@@ -518,37 +540,48 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
             }),
         ];
         edges = [
-            _edge("edge-p1-p2", "node-p1", "node-p2"),
+            _edge("edge-source-p2", "workflow-source", "node-p2"),
             _edge("edge-p2-p3", "node-p2", "node-p3"),
             _edge("edge-p2-p4", "node-p2", "node-p4"),
         ];
     } elif "desktop" in lowered or "finder" in lowered or "organize" in lowered {
         nodes = [
-            _node("node-p1", "mac_finder", "Finder File Manager", "mac", 440, 140, {
+            _node("workflow-source", "source", "Source", "source", 32, 140, {
+                "eventType": "trigger_file", "runMode": _run_mode(prompt),
+                "watchPath": "~/Desktop", "filePattern": "*",
+                "checkIntervalSec": 2
+            }),
+            _node("node-p2", "mac_finder", "Finder File Manager", "mac", 440, 140, {
                 "app": "Finder", "action": "organize_by_extension",
                 "targetDirectory": "~/Desktop"
             }),
-            _node("node-p2", "mac_notes", "Apple Notes", "mac", 800, 140, {
+            _node("node-p3", "mac_notes", "Apple Notes", "mac", 800, 140, {
                 "app": "Notes", "action": "create_note",
                 "folder": "Swirl Automations",
                 "defaultTitle": "Desktop Organization Report"
             }),
         ];
         edges = [
-            _edge("edge-p1-p2", "node-p1", "node-p2"),
+            _edge("edge-source-p2", "workflow-source", "node-p2"),
+            _edge("edge-p2-p3", "node-p2", "node-p3"),
         ];
     } else {
         nodes = [
-            _node("node-p1", "mcp_fetch", "MCP Web Scraper", "mcp", 440, 140, {
+            _node("workflow-source", "source", "Source", "source", 32, 140, {
+                "eventType": "trigger_cron", "runMode": "continuous",
+                "cron": "0 * * * *", "timezone": "America/Los_Angeles"
+            }),
+            _node("node-p2", "mcp_fetch", "MCP Web Scraper", "mcp", 440, 140, {
                 "server": "fetch-mcp-server", "tool_name": "fetch",
                 "url": "https://example.com"
             }),
-            _node("node-p2", "llm_summarize", "LLM Summarizer", "ai", 800, 140, {
+            _node("node-p3", "llm_summarize", "LLM Summarizer", "ai", 800, 140, {
                 "prompt": prompt, "maxTokens": 500, "temperature": 0.2
             }),
         ];
         edges = [
-            _edge("edge-p1-p2", "node-p1", "node-p2"),
+            _edge("edge-source-p2", "workflow-source", "node-p2"),
+            _edge("edge-p2-p3", "node-p2", "node-p3"),
         ];
     }
     return WorkflowAst(nodes=nodes, edges=edges, source="rules");

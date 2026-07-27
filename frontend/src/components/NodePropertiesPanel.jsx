@@ -31,6 +31,7 @@ const FRIENDLY_KEY_LABELS = {
   wakeWord: '🎙️ Voice Wake Word',
   language: '🗣️ Recognition Language',
   listenTimeoutSec: '⌛ Whisper Poll Timeout (seconds)',
+  phoneNumber: '📱 Self-Text Phone Number',
   prompt: '✨ AI Assistant Instructions',
   maxTokens: '📏 Response Detail Level',
   temperature: '🎨 AI Creativity (0 = Precise, 1 = Creative)',
@@ -183,21 +184,40 @@ export default function NodePropertiesPanel({
           />
         </div>
 
-        <div>
-          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1 font-sans">
-            Custom Prompt
-          </label>
-          <textarea
-            rows={3}
-            value={customPrompt}
-            onChange={(e) => handleCustomPromptChange(e.target.value)}
-            placeholder="Optional instructions for this block during execution"
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-sans text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition resize-y"
-          />
-          <p className="mt-1 text-[10px] text-zinc-500">AI blocks use this as their instruction. Other blocks receive it in execution context.</p>
-        </div>
+        {!isSource && (
+          <div>
+            <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1 font-sans">
+              Custom Prompt
+            </label>
+            <textarea
+              rows={3}
+              value={customPrompt}
+              onChange={(e) => handleCustomPromptChange(e.target.value)}
+              placeholder="Optional instructions for this block during execution"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-sans text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition resize-y"
+            />
+            <p className="mt-1 text-[10px] text-zinc-500">AI blocks use this as their instruction. Other blocks receive it in execution context.</p>
+          </div>
+        )}
 
-        {isSource && <p className="text-xs text-zinc-400">Starts immediately when you press Run Workflow.</p>}
+        {isSource && (
+          <div>
+            <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1 font-sans">
+              Trigger Event Type
+            </label>
+            <select
+              value={config.eventType || 'trigger_email'}
+              onChange={(e) => handleSourceEventChange(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-zinc-700 font-sans"
+            >
+              {Object.entries(SOURCE_EVENTS).map(([eventType, event]) => (
+                <option key={eventType} value={eventType}>
+                  {event.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="space-y-4 pt-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
@@ -205,7 +225,8 @@ export default function NodePropertiesPanel({
             <HelpCircle className="w-3.5 h-3.5 text-zinc-500" />
           </div>
 
-          {!isSource && Object.entries(config)
+          {Object.entries(config)
+            .filter(([key]) => !isSource || key !== 'eventType')
             .map(([key, val]) => {
               const label = FRIENDLY_KEY_LABELS[key] || key;
 
