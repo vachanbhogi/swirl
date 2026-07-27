@@ -9,9 +9,11 @@ import WorkflowsScreen from './components/WorkflowsScreen';
 import SaveWorkflowModal from './components/SaveWorkflowModal';
 import ExecutionInspector from './components/ExecutionInspector';
 import { INITIAL_NODES, INITIAL_EDGES } from './data/blockDefinitions';
+import { suggestGeneratedWorkflowName } from './data/generatedProject';
 import { normalizeWorkflow } from './data/workflowNormalization';
 import {
   compileWorkflowPrompt,
+  createWorkflow,
   generateJacSource,
   saveWorkflow,
   loadWorkflow,
@@ -56,6 +58,7 @@ export default function App() {
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const currentNameRef = useRef(currentWorkflowName);
+  const skipNextAutoSaveRef = useRef(false);
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
@@ -150,6 +153,10 @@ export default function App() {
 
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (skipNextAutoSaveRef.current) {
+      skipNextAutoSaveRef.current = false;
+      return;
+    }
     if (!currentWorkflowName) return;
     setHasUnsavedChanges(true);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -180,6 +187,7 @@ export default function App() {
       const record = await loadWorkflow(name);
       if (!record?.workflow) throw new Error('Workflow record is empty.');
       const loaded = normalizeWorkflow(record.workflow.nodes || [], record.workflow.edges || []);
+      skipNextAutoSaveRef.current = true;
       setNodes(loaded.nodes);
       setEdges(loaded.edges);
       setCurrentWorkflowName(record.name);
@@ -198,6 +206,7 @@ export default function App() {
 
   const handleSaveWorkflowAs = async (name) => {
     setShowSaveModal(false);
+    skipNextAutoSaveRef.current = true;
     setCurrentWorkflowName(name);
     await performSave(name, nodesRef.current, edgesRef.current);
   };
@@ -223,13 +232,16 @@ export default function App() {
   };
 
   const handleDropNewBlock = (blockDef, x, y) => {
+    const position = { x: x ?? 250, y: y ?? 180 };
     const newNode = {
       id: `node-${Date.now()}`,
       type: blockDef.type,
       title: blockDef.title,
       category: blockDef.category,
       jacNode: blockDef.jacNode || 'WorkflowBlock',
-      position: { x: x ?? 250, y: y ?? 180 },
+      x: position.x,
+      y: position.y,
+      position,
       customPrompt: '',
       config: { ...blockDef.config },
       status: 'idle'
@@ -250,10 +262,13 @@ export default function App() {
   };
 
   const handleDuplicateNode = (node) => {
+    const position = { x: node.x + 40, y: node.y + 40 };
     const newNode = {
       ...node,
       id: `node-${Date.now()}`,
-      position: { x: node.position.x + 40, y: node.position.y + 40 },
+      x: position.x,
+      y: position.y,
+      position,
       status: 'idle'
     };
     setNodes((prev) => [...prev, newNode]);
@@ -317,20 +332,72 @@ export default function App() {
 
   const handleGenerateFromPrompt = async (prompt) => {
     setIsCompilingPrompt(true);
-    setCompileStatus({ type: 'compiling', message: 'Jac is translating your description into a validated workflow…' });
+    setCompileStatus({ type: 'compiling', message: 'Jac AI is building your new workflow project…' });
     try {
       const result = await compileWorkflowPrompt(prompt, true);
       if (!result?.nodes) throw new Error('Jac compiler returned no workflow graph.');
       const workflow = normalizeWorkflow(result.nodes, result.edges || []);
+      const projectName = suggestGeneratedWorkflowName(prompt);
+      const generatorLabel = result.source === 'llm' ? 'Jac LLM' : 'Jac fast compiler';
+
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      currentNameRef.current = null;
+      setCurrentWorkflowName(null);
+      setHasUnsavedChanges(true);
+      setSaveError(null);
       setNodes(workflow.nodes);
       setEdges(workflow.edges);
       setSelectedNodeId(null);
+      setExecutionResults({});
+      setGeneratedCode(null);
+      setShowCodeView(false);
+      setShowLogsInspector(false);
       setEditingWorkflow(true);
       setActiveTab('workflow');
-      setCompileStatus({ type: 'success', message: `Generated ${workflow.nodes.length} connected blocks.` });
-      setLogs((prev) => [...prev, {
-        time: new Date().toLocaleTimeString(), type: 'success', prefix: 'compile', message: `Generated ${workflow.nodes.length} blocks from Jac LLM.`
+      setLogs([{
+        time: new Date().toLocaleTimeString(),
+        type: 'success',
+        prefix: 'compile',
+        message: `Generated ${workflow.nodes.length} blocks with ${generatorLabel}.`
       }]);
+
+      try {
+        const record = await createWorkflow(projectName, workflow);
+        skipNextAutoSaveRef.current = true;
+        currentNameRef.current = record.name;
+        setCurrentWorkflowName(record.name);
+        setHasUnsavedChanges(false);
+        setSavedWorkflows((current) => [
+          record,
+          ...current.filter((workflowRecord) => workflowRecord.name !== record.name)
+        ]);
+        setCompileStatus({
+          type: 'success',
+          message: `Created "${record.name}" with ${workflow.nodes.length} connected blocks using ${generatorLabel}.`
+        });
+        setLogs((current) => [...current, {
+          time: new Date().toLocaleTimeString(),
+          type: 'success',
+          prefix: 'project',
+          message: `Created new workflow project "${record.name}".`
+        }]);
+      } catch (saveFailure) {
+        const message = saveFailure?.message || String(saveFailure);
+        setSaveError(`New project could not be saved: ${message}`);
+        setCompileStatus({
+          type: 'error',
+          message: `The workflow was generated, but its new project could not be saved: ${message}`
+        });
+        setLogs((current) => [...current, {
+          time: new Date().toLocaleTimeString(),
+          type: 'error',
+          prefix: 'project',
+          message: `Generated workflow is unsaved: ${message}`
+        }]);
+      }
     } catch (error) {
       setCompileStatus({
         type: 'error',

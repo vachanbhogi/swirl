@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Zap, 
   Sparkles, 
@@ -9,9 +9,7 @@ import {
   Trash2, 
   Settings, 
   CheckCircle2, 
-  AlertCircle, 
-  Loader2,
-  X
+  Loader2
 } from 'lucide-react';
 import { BLOCK_CATEGORIES } from '../data/blockDefinitions';
 
@@ -45,11 +43,12 @@ export default function ScratchCanvas({
 
     if (draggingNodeId) {
       setNodes((prevNodes) =>
-        prevNodes.map((n) =>
-          n.id === draggingNodeId
-            ? { ...n, position: { x: Math.max(20, currentX - dragOffset.x), y: Math.max(20, currentY - dragOffset.y) } }
-            : n
-        )
+        prevNodes.map((node) => {
+          if (node.id !== draggingNodeId) return node;
+          const x = Math.max(20, currentX - dragOffset.x);
+          const y = Math.max(20, currentY - dragOffset.y);
+          return { ...node, x, y, position: { x, y } };
+        })
       );
     }
   };

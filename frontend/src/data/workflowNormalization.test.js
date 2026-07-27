@@ -7,7 +7,7 @@ import {
   SOURCE_ID
 } from './workflowNormalization.js';
 
-test('normalization creates exactly one leftmost Source', () => {
+test('normalization creates exactly one default-positioned Source', () => {
   const workflow = normalizeWorkflow(
     [{ id: 'summary', type: 'llm_summarize', category: 'ai', title: 'Summary', x: 400, y: 100, config: {} }],
     []
@@ -57,4 +57,57 @@ test('duplicate generated sources collapse to the canonical Source', () => {
   assert.equal(workflow.nodes.filter((node) => node.category === 'source').length, 1);
   assert.equal(workflow.nodes[0].id, SOURCE_ID);
   assert.equal(workflow.nodes[0].config.eventType, 'trigger_voice');
+});
+
+test('persisted node positions round-trip through canvas coordinates', () => {
+  const loaded = normalizeWorkflow(
+    [
+      {
+        id: SOURCE_ID,
+        type: 'source',
+        category: 'source',
+        title: 'Source',
+        position: { x: 84, y: 156 },
+        config: { eventType: 'trigger_email' }
+      },
+      {
+        id: 'summary',
+        type: 'llm_summarize',
+        category: 'ai',
+        title: 'Summary',
+        position: { x: 512, y: 288 },
+        config: {}
+      }
+    ],
+    [{ id: 'source-summary', source: SOURCE_ID, target: 'summary' }]
+  );
+
+  assert.deepEqual(
+    loaded.nodes.map(({ id, x, y, position }) => ({ id, x, y, position })),
+    [
+      { id: SOURCE_ID, x: 84, y: 156, position: { x: 84, y: 156 } },
+      { id: 'summary', x: 512, y: 288, position: { x: 512, y: 288 } }
+    ]
+  );
+
+  const saved = normalizeWorkflow(
+    loaded.nodes.map((node) => (
+      node.id === 'summary' ? { ...node, x: 640, y: 336 } : node
+    )),
+    loaded.edges
+  );
+
+  assert.deepEqual(
+    saved.nodes.find((node) => node.id === 'summary').position,
+    { x: 640, y: 336 }
+  );
+
+  const reopened = normalizeWorkflow(
+    saved.nodes.map(({ x: _x, y: _y, ...persistedNode }) => persistedNode),
+    saved.edges
+  );
+  assert.deepEqual(
+    reopened.nodes.find((node) => node.id === 'summary'),
+    saved.nodes.find((node) => node.id === 'summary')
+  );
 });

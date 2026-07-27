@@ -66,11 +66,12 @@ export default function WhiteboardCard({
 
     if (draggingNodeId) {
       setNodes((prevNodes) =>
-        prevNodes.map((n) =>
-          n.id === draggingNodeId
-            ? { ...n, x: currentX - dragOffset.x, y: currentY - dragOffset.y }
-            : n
-        )
+        prevNodes.map((node) => {
+          if (node.id !== draggingNodeId) return node;
+          const x = currentX - dragOffset.x;
+          const y = currentY - dragOffset.y;
+          return { ...node, x, y, position: { x, y } };
+        })
       );
     } else if (isPanning) {
       const dx = e.clientX - panRef.current.startX;

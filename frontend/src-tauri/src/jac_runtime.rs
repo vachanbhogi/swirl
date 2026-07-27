@@ -139,7 +139,7 @@ pub fn invoke(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
     let mut jac_command = Command::new(jac_binary(app));
     jac_command
         .arg("run")
-        .arg("--no-cache")
+        .arg("--cache")
         .arg(&script)
         .arg(command)
         .arg(&payload_path)

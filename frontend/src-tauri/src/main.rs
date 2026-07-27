@@ -504,22 +504,45 @@ fn validate_generated_catalog(workflow: &WorkflowDocument) -> Result<(), String>
     Ok(())
 }
 
-#[tauri::command]
-fn compile_prompt(app: AppHandle, prompt: String, use_llm: Option<bool>) -> Result<Value, String> {
-    let generated = jac_runtime::invoke(
-        &app,
-        if use_llm.unwrap_or(false) {
-            "prompt-llm"
-        } else {
-            "prompt"
-        },
-        &json!({ "prompt": prompt }),
-    )?;
+fn compile_prompt_blocking(
+    app: &AppHandle,
+    prompt: String,
+    use_llm: Option<bool>,
+) -> Result<Value, String> {
+    let payload = json!({ "prompt": prompt });
+    let llm_requested = use_llm.unwrap_or(false);
+    let llm_configured = jac_runtime::runtime_script(app)
+        .map(|script| jac_runtime::nvidia_api_key_configured(&script))
+        .unwrap_or(false);
+    let generated = if llm_requested && llm_configured {
+        match jac_runtime::invoke(app, "prompt-llm", &payload) {
+            Ok(workflow) => workflow,
+            Err(error) => {
+                eprintln!(
+                    "[Swirl][Jac] hosted prompt compiler failed; using local fast compiler: {error}"
+                );
+                jac_runtime::invoke(app, "prompt", &payload)?
+            }
+        }
+    } else {
+        jac_runtime::invoke(app, "prompt", &payload)?
+    };
     let workflow: WorkflowDocument = serde_json::from_value(generated.clone())
         .map_err(|error| format!("Jac LLM returned a malformed workflow: {error}"))?;
     workflow.validate()?;
     validate_generated_catalog(&workflow)?;
     Ok(generated)
+}
+
+#[tauri::command]
+async fn compile_prompt(
+    app: AppHandle,
+    prompt: String,
+    use_llm: Option<bool>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || compile_prompt_blocking(&app, prompt, use_llm))
+        .await
+        .map_err(|error| format!("Jac prompt compiler task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1122,6 +1145,15 @@ fn save_workflow(
 }
 
 #[tauri::command]
+fn create_workflow(
+    app: AppHandle,
+    name: String,
+    workflow: WorkflowDocument,
+) -> Result<storage::WorkflowRecord, String> {
+    storage::create_workflow(&app, &name, workflow)
+}
+
+#[tauri::command]
 fn load_workflow(app: AppHandle, name: String) -> Result<storage::WorkflowRecord, String> {
     storage::load_workflow(&app, &name)
 }
@@ -1219,6 +1251,7 @@ fn main() {
             call_mcp_tool,
             list_builtin_mcp_servers,
             save_workflow,
+            create_workflow,
             load_workflow,
             list_workflows,
             delete_workflow,

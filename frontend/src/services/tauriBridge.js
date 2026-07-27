@@ -53,6 +53,10 @@ export async function saveWorkflow(name, workflow) {
   return invokeBackend('save_workflow', { name, workflow });
 }
 
+export async function createWorkflow(name, workflow) {
+  return invokeBackend('create_workflow', { name, workflow });
+}
+
 export async function loadWorkflow(name) {
   return invokeBackend('load_workflow', { name });
 }

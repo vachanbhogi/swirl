@@ -56,6 +56,21 @@ export const changeSourceEvent = (eventType, current = {}) => sourceConfig(event
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+function normalizeNodePosition(node, defaultX = 250, defaultY = 180) {
+  const x = Number.isFinite(node?.x)
+    ? node.x
+    : Number.isFinite(node?.position?.x)
+      ? node.position.x
+      : defaultX;
+  const y = Number.isFinite(node?.y)
+    ? node.y
+    : Number.isFinite(node?.position?.y)
+      ? node.position.y
+      : defaultY;
+
+  return { ...node, x, y, position: { x, y } };
+}
+
 export function createSourceNode(config = {}, x = 32, y = 140) {
   const normalizedConfig = sourceConfig(config.eventType || 'trigger_email', config);
   return {
@@ -66,6 +81,7 @@ export function createSourceNode(config = {}, x = 32, y = 140) {
     jacNode: 'SourceBlock',
     x,
     y,
+    position: { x, y },
     config: normalizedConfig,
     status: 'idle'
   };
@@ -73,7 +89,12 @@ export function createSourceNode(config = {}, x = 32, y = 140) {
 
 function legacyTriggerToSource(trigger) {
   const eventType = SOURCE_EVENTS[trigger?.type] ? trigger.type : 'trigger_email';
-  return createSourceNode({ eventType, ...(trigger?.config || {}) }, 32, trigger?.y ?? 140);
+  const positionedTrigger = normalizeNodePosition(trigger, 32, 140);
+  return createSourceNode(
+    { eventType, ...(trigger?.config || {}) },
+    positionedTrigger.x,
+    positionedTrigger.y
+  );
 }
 
 /**
@@ -85,7 +106,11 @@ export function normalizeWorkflow(nodes = [], edges = []) {
   const inputEdges = clone(edges || []);
   const sourceCandidates = inputNodes.filter((node) => node.category === 'source' || node.type === 'source');
   const legacyTriggers = inputNodes.filter((node) => node.category === 'trigger');
-  const source = sourceCandidates[0] || (legacyTriggers[0] ? legacyTriggerToSource(legacyTriggers[0]) : createSourceNode());
+  const source = normalizeNodePosition(
+    sourceCandidates[0] || (legacyTriggers[0] ? legacyTriggerToSource(legacyTriggers[0]) : createSourceNode()),
+    32,
+    140
+  );
   const removedIds = new Set([
     ...sourceCandidates.slice(1).map((node) => node.id),
     ...legacyTriggers.map((node) => node.id).filter((id) => id !== source.id)
@@ -100,12 +125,11 @@ export function normalizeWorkflow(nodes = [], edges = []) {
   source.category = 'source';
   source.title = 'Source';
   source.jacNode = 'SourceBlock';
-  source.x = 32;
   source.config = sourceConfig(source.config?.eventType || 'trigger_email', source.config);
 
   const retainedNodes = inputNodes
     .filter((node) => !removedIds.has(node.id) && node.category !== 'trigger')
-    .map((node) => ({ ...node, status: node.status || 'idle' }));
+    .map((node) => normalizeNodePosition({ ...node, status: node.status || 'idle' }));
   const nodeIds = new Set([SOURCE_ID, ...retainedNodes.map((node) => node.id)]);
   const rewiredEdges = inputEdges
     .map((edge) => ({

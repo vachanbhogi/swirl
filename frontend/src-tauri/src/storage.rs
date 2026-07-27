@@ -2,11 +2,14 @@ use crate::models::WorkflowDocument;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
+
+const MAX_WORKFLOW_NAME_LENGTH: usize = 80;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +21,7 @@ pub struct WorkflowRecord {
 
 fn safe_name(name: &str) -> Result<String, String> {
     let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.len() > 80 {
+    if trimmed.is_empty() || trimmed.len() > MAX_WORKFLOW_NAME_LENGTH {
         return Err("Workflow name must be 1-80 characters".into());
     }
     if !trimmed
@@ -58,6 +61,43 @@ fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), String> 
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
+fn create_json_file(path: &Path, value: &impl Serialize) -> Result<bool, String> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    if let Err(error) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(path);
+        return Err(error.to_string());
+    }
+    Ok(true)
+}
+
+fn numbered_name(base: &str, number: usize) -> String {
+    let suffix = if number == 1 {
+        String::new()
+    } else {
+        format!(" {number}")
+    };
+    let stem_length = MAX_WORKFLOW_NAME_LENGTH.saturating_sub(suffix.len());
+    let stem = base.chars().take(stem_length).collect::<String>();
+    format!("{}{}", stem.trim_end(), suffix)
+}
+
+fn workflow_record(name: &str, workflow: WorkflowDocument) -> Result<WorkflowRecord, String> {
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    Ok(WorkflowRecord {
+        name: name.trim().to_string(),
+        updated_at,
+        workflow,
+    })
+}
+
 pub fn save_workflow(
     app: &AppHandle,
     name: &str,
@@ -73,17 +113,32 @@ pub fn save_workflow(
                 .map_err(|error| error.to_string())?;
         ensure_record_name(&existing, name)?;
     }
-    let updated_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_secs();
-    let record = WorkflowRecord {
-        name: name.trim().to_string(),
-        updated_at,
-        workflow,
-    };
+    let record = workflow_record(name, workflow)?;
     atomic_json_write(&path, &record)?;
     Ok(record)
+}
+
+pub fn create_workflow(
+    app: &AppHandle,
+    name: &str,
+    mut workflow: WorkflowDocument,
+) -> Result<WorkflowRecord, String> {
+    workflow.migrate_legacy_layout();
+    workflow.validate()?;
+    let base_name = name.trim();
+    safe_name(base_name)?;
+    let directory = data_dir(app, "workflows")?;
+
+    for number in 1..=10_000 {
+        let candidate = numbered_name(base_name, number);
+        let file_name = safe_name(&candidate)?;
+        let path = directory.join(format!("{file_name}.json"));
+        let record = workflow_record(&candidate, workflow.clone())?;
+        if create_json_file(&path, &record)? {
+            return Ok(record);
+        }
+    }
+    Err("Could not allocate a unique workflow project name".into())
 }
 
 pub fn load_workflow(app: &AppHandle, name: &str) -> Result<WorkflowRecord, String> {
@@ -156,5 +211,31 @@ mod tests {
         };
         assert!(ensure_record_name(&record, "Daily_Brief").is_err());
         assert!(ensure_record_name(&record, "Daily Brief").is_ok());
+    }
+
+    #[test]
+    fn generated_names_add_a_suffix_without_exceeding_the_limit() {
+        let base = "A".repeat(80);
+        assert_eq!(numbered_name(&base, 1), base);
+        assert_eq!(numbered_name(&base, 2), format!("{} 2", "A".repeat(78)));
+        assert_eq!(numbered_name("Daily Brief", 3), "Daily Brief 3");
+    }
+
+    #[test]
+    fn create_only_write_preserves_an_existing_project() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("swirl-storage-test-{unique}"));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("project.json");
+
+        assert!(create_json_file(&path, &serde_json::json!({ "version": 1 })).unwrap());
+        assert!(!create_json_file(&path, &serde_json::json!({ "version": 2 })).unwrap());
+        let stored: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored["version"], 1);
+
+        fs::remove_dir_all(directory).unwrap();
     }
 }
