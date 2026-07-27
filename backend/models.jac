@@ -1,5 +1,46 @@
 """Shared Jac data models for canonical source-based workflows."""
 
+glob SUPPORTED_BLOCKS: set[str] = {
+    "on_run",
+    "source",
+    "output",
+    "mac_wait_email",
+    "llm_summarize",
+    "mac_notes",
+    "mac_finder",
+    "mac_notification",
+    "mac_terminal",
+    "mcp_fetch",
+    "mcp_fs",
+    "mcp_search",
+    "output_slack",
+};
+
+glob GENERATED_SOURCE_EVENTS: set[str] = {
+    "trigger_email",
+    "trigger_file",
+    "trigger_cron",
+    "trigger_clipboard",
+    "trigger_webhook",
+    "trigger_voice",
+    "trigger_sms",
+};
+
+glob GENERATED_BLOCK_PAIRS: set[str] = {
+    "llm_summarize:ai",
+    "llm_extract:ai",
+    "llm_classifier:ai",
+    "mac_notes:mac",
+    "mac_finder:mac",
+    "mac_notification:mac",
+    "mac_terminal:mac",
+    "mcp_fetch:mcp",
+    "mcp_fs:mcp",
+    "mcp_search:mcp",
+    "logic_if:logic",
+    "output_slack:output",
+};
+
 
 obj WorkflowNode {
     has id: str;
@@ -38,6 +79,14 @@ obj WorkflowDocument {
         source_id: str = "";
         for node in self.nodes {
             node_id: str = str(node.get("id", ""));
+            block_type: str = str(node.get("type", ""));
+            if block_type not in SUPPORTED_BLOCKS {
+                raise ValueError(
+                    "Unsupported legacy block type: "
+                    + block_type
+                    + ". Remove it and use a supported block."
+                );
+            }
             if not node_id.strip() {
                 raise ValueError("Workflow node IDs cannot be empty");
             }
@@ -82,8 +131,8 @@ obj WorkflowDocument {
                 );
             }
             target_category: str = categories[target];
-            if target_category == "source" or target_category == "trigger" {
-                raise ValueError("On Run and trigger blocks cannot have incoming edges");
+            if target_category == "source" {
+                raise ValueError("Source node cannot have incoming edges");
             }
             indegree[target] += 1;
             outgoing[edge_source].append(target);
@@ -125,10 +174,53 @@ obj WorkflowDocument {
         }
         if len(reachable) != len(self.nodes) {
             raise ValueError(
-                "Every workflow node must be reachable from On Run or a trigger"
+                "Every workflow node must be reachable from Source"
             );
         }
     }
+}
+
+
+def validate_workflow(workflow: dict) -> dict {
+    document = WorkflowDocument(
+        nodes=workflow.get("nodes", []) as list[dict],
+        edges=workflow.get("edges", []) as list[dict],
+    );
+    document.validate();
+    return {"valid": True};
+}
+
+
+def validate_generated_workflow(workflow: dict) -> dict {
+    validate_workflow(workflow);
+    nodes: list[dict] = workflow.get("nodes", []) as list[dict];
+    for node in nodes {
+        category: str = str(node.get("category", ""));
+        block_type: str = str(node.get("type", ""));
+        if category == "source" {
+            config: dict = node.get("config", {}) as dict;
+            event_type: str = str(config.get("eventType", ""));
+            if block_type != "source" or event_type not in GENERATED_SOURCE_EVENTS {
+                raise ValueError(
+                    f"Unsupported generated Source event: {event_type}"
+                );
+            }
+            run_mode: str = str(config.get("runMode", "once"));
+            if run_mode not in {"once", "continuous"} {
+                raise ValueError(
+                    f"Unsupported generated Source run mode: {run_mode}"
+                );
+            }
+        } elif f"{block_type}:{category}" not in GENERATED_BLOCK_PAIRS {
+            raise ValueError(
+                "Unsupported generated block/category pair: "
+                + block_type
+                + "/"
+                + category
+            );
+        }
+    }
+    return {"valid": True};
 }
 
 
@@ -190,10 +282,21 @@ def source_node(node_id: str = "source") -> dict {
 }
 
 
+def action_node(node_id: str, category: str = "ai") -> dict {
+    return {
+        "id": node_id,
+        "type": "llm_summarize" if category == "ai" else "output",
+        "title": node_id,
+        "category": category,
+        "config": {},
+    };
+}
+
+
 test "validates a source-based DAG" {
     nodes: list[dict] = [
         source_node(),
-        {"id": "b", "title": "B", "category": "ai"},
+        action_node("b"),
     ];
     edges: list[dict] = [
         {"id": "e1", "source": "source", "target": "b"},
@@ -205,8 +308,8 @@ test "validates a source-based DAG" {
 test "rejects cycles" {
     nodes: list[dict] = [
         source_node(),
-        {"id": "a", "title": "A", "category": "ai"},
-        {"id": "b", "title": "B", "category": "ai"},
+        action_node("a"),
+        action_node("b"),
     ];
     edges: list[dict] = [
         {"id": "e1", "source": "source", "target": "a"},
@@ -225,7 +328,7 @@ test "rejects cycles" {
 test "rejects incoming source edges" {
     nodes: list[dict] = [
         source_node(),
-        {"id": "a", "title": "A", "category": "ai"},
+        action_node("a"),
     ];
     edges: list[dict] = [
         {"id": "e1", "source": "a", "target": "source"},
@@ -242,7 +345,7 @@ test "rejects incoming source edges" {
 test "rejects missing source" {
     try {
         WorkflowDocument(
-            nodes=[{"id": "a", "title": "A", "category": "ai"}],
+            nodes=[action_node("a")],
             edges=[],
         ).validate();
         assert False;
@@ -270,7 +373,7 @@ test "rejects nodes disconnected from source" {
         WorkflowDocument(
             nodes=[
                 source_node(),
-                {"id": "result", "title": "Result", "category": "output"},
+                action_node("result", "output"),
             ],
             edges=[],
         ).validate();

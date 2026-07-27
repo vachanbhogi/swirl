@@ -4,26 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "vite": "vite",
-    "build": "vite build",
-    "test": "node --test src/**/*.test.js",
+    "dev": "cd .. && jac start --dev main.jac --port 5173",
+    "build": "cd .. && jac build main.jac --client web",
+    "test": "cd .. && jac clean --data --force && jac test backend/engine_tests.jac -v",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
-  "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "canvas-confetti": "^1.9.4",
-    "lucide-react": "^1.27.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
-  },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "oxlint": "^1.71.0",
-    "vite": "^8.1.1"
+    "@tauri-apps/cli": "^2.11.4"
   }
 }

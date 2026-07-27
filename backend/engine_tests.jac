@@ -33,6 +33,13 @@ test "prompt compiler creates continuous self-text source" {
     assert ast.nodes[0]["config"]["eventType"] == "trigger_sms";
     assert ast.nodes[0]["config"]["runMode"] == "continuous";
     assert ast.nodes[0]["config"]["phoneNumber"] == "8604644276";
+    assert len(ast.nodes) == 4;
+    assert len(ast.edges) == 3;
+    assert ast.nodes[1]["type"] == "llm_summarize";
+    assert ast.nodes[2]["type"] == "mac_notes";
+    assert ast.nodes[2]["config"]["folder"] == "Swirl Action Items";
+    assert ast.nodes[2]["config"]["noteStyle"] == "actionBrief";
+    assert ast.nodes[3]["type"] == "mac_notification";
     assert ast.edges[0]["source"] == "workflow-source";
 }
 

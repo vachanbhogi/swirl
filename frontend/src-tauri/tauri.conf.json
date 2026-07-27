@@ -7,7 +7,7 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "frontendDist": "../../.jac/client/dist"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -55,6 +55,8 @@
       "../../backend/mac_control.jac",
       "../../backend/mcp_bridge.jac",
       "../../backend/code_generator.jac",
+      "../../backend/models.jac",
+      "../../backend/storage.jac",
       "../../backend/swirl_runtime.jac"
     ],
     "icon": [

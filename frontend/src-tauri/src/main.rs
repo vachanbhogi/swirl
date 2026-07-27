@@ -250,8 +250,19 @@ fn execute_node(
                     )
                 })
                 .transpose();
-            let (local_summary, local_action_items) =
+            let original_input = input.to_string();
+            let is_sms = context.get("triggerType").and_then(Value::as_str) == Some("trigger_sms");
+            let (local_summary, mut local_action_items) =
                 local_email_summary(input, context.get("email"));
+            if is_sms && local_action_items.is_empty() {
+                let request = original_input
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !request.is_empty() {
+                    local_action_items.push(request);
+                }
+            }
             let (summary, mode, fallback_error) = match llm_result {
                 Ok(Some(value)) => {
                     let generated = value
@@ -280,6 +291,14 @@ fn execute_node(
                 "mode": mode,
                 "fallbackError": fallback_error
             });
+            context.insert("originalRequest".into(), Value::String(original_input));
+            context.insert(
+                "actionItems".into(),
+                output
+                    .get("actionItems")
+                    .cloned()
+                    .unwrap_or(Value::Array(Vec::new())),
+            );
             context.insert(
                 "text".into(),
                 output.get("summary").cloned().unwrap_or(Value::Null),
@@ -289,6 +308,21 @@ fn execute_node(
         "mac" => {
             let mut params = node.config.clone();
             if let Some(object) = params.as_object_mut() {
+                if node.block_type == "mac_notes"
+                    && context.get("triggerType").and_then(Value::as_str) == Some("trigger_sms")
+                {
+                    object.insert("noteStyle".into(), Value::String("actionBrief".into()));
+                    for (target, source) in [
+                        ("originalRequest", "originalRequest"),
+                        ("summary", "text"),
+                        ("actionItems", "actionItems"),
+                        ("receivedAtMs", "triggerTimestamp"),
+                    ] {
+                        if let Some(value) = context.get(source) {
+                            object.insert(target.into(), value.clone());
+                        }
+                    }
+                }
                 if node.block_type == "mac_notes" && !object.contains_key("title") {
                     if let Some(subject) = context
                         .get("email")
@@ -453,58 +487,6 @@ fn backend_health(app: AppHandle) -> Value {
     jac_runtime::health(&app)
 }
 
-fn validate_generated_catalog(workflow: &WorkflowDocument) -> Result<(), String> {
-    const SOURCE_EVENTS: &[&str] = &[
-        "trigger_email",
-        "trigger_file",
-        "trigger_cron",
-        "trigger_clipboard",
-        "trigger_webhook",
-        "trigger_voice",
-        "trigger_sms",
-    ];
-    const BLOCKS: &[(&str, &str)] = &[
-        ("llm_summarize", "ai"),
-        ("llm_extract", "ai"),
-        ("llm_classifier", "ai"),
-        ("mac_notes", "mac"),
-        ("mac_finder", "mac"),
-        ("mac_notification", "mac"),
-        ("mac_terminal", "mac"),
-        ("mcp_fetch", "mcp"),
-        ("mcp_fs", "mcp"),
-        ("mcp_search", "mcp"),
-        ("logic_if", "logic"),
-        ("output_slack", "output"),
-    ];
-    for node in &workflow.nodes {
-        if node.category == "source" {
-            let event_type = node
-                .config
-                .get("eventType")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "Generated Source is missing eventType".to_string())?;
-            if node.block_type != "source" || !SOURCE_EVENTS.contains(&event_type) {
-                return Err(format!("Unsupported generated Source event: {event_type}"));
-            }
-            let run_mode = node
-                .config
-                .get("runMode")
-                .and_then(Value::as_str)
-                .unwrap_or("once");
-            if !matches!(run_mode, "once" | "continuous") {
-                return Err(format!("Unsupported generated Source run mode: {run_mode}"));
-            }
-        } else if !BLOCKS.contains(&(node.block_type.as_str(), node.category.as_str())) {
-            return Err(format!(
-                "Unsupported generated block/category pair: {}/{}",
-                node.block_type, node.category
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn compile_prompt_blocking(
     app: &AppHandle,
     prompt: String,
@@ -528,10 +510,8 @@ fn compile_prompt_blocking(
     } else {
         jac_runtime::invoke(app, "prompt", &payload)?
     };
-    let workflow: WorkflowDocument = serde_json::from_value(generated.clone())
+    let _workflow: WorkflowDocument = serde_json::from_value(generated.clone())
         .map_err(|error| format!("Jac LLM returned a malformed workflow: {error}"))?;
-    workflow.validate()?;
-    validate_generated_catalog(&workflow)?;
     Ok(generated)
 }
 
@@ -548,7 +528,6 @@ async fn compile_prompt(
 
 #[tauri::command]
 fn generate_jac_source(app: AppHandle, workflow: WorkflowDocument) -> Result<String, String> {
-    workflow.validate()?;
     let value = serde_json::to_value(workflow).map_err(|error| error.to_string())?;
     jac_runtime::invoke(&app, "code", &value)?
         .get("source")
@@ -563,7 +542,6 @@ fn execute_workflow(
     request: WorkflowExecutionRequest,
     mcp: State<'_, McpState>,
 ) -> Result<ExecutionSummary, String> {
-    request.workflow.validate()?;
     let workflow_value =
         serde_json::to_value(&request.workflow).map_err(|error| error.to_string())?;
     let plan_value = jac_runtime::invoke(&app, "plan", &workflow_value)?;
@@ -719,7 +697,6 @@ fn start_workflow(
     request: WorkflowExecutionRequest,
     runs: State<'_, WorkflowRunState>,
 ) -> Result<Value, String> {
-    request.workflow.validate()?;
     let workflow_value =
         serde_json::to_value(&request.workflow).map_err(|error| error.to_string())?;
     let plan_value = jac_runtime::invoke(&app, "plan", &workflow_value)?;

@@ -7,6 +7,13 @@ import from backend.workflow_agent {
 }
 import from backend.code_generator { JacCodeGeneratorWalker }
 import from backend.mac_control { classify_mac_action, validate_mac_action }
+import from backend.models {
+    validate_workflow, validate_generated_workflow
+}
+import from backend.storage {
+    save_workflow, create_workflow, load_workflow, list_workflows,
+    delete_workflow, save_trace
+}
 import from backend.mcp_bridge {
     initialize_request, tools_list_request, tool_call_request,
     validate_transport, validate_server_name,
@@ -42,7 +49,9 @@ def run_command(command: str, payload: dict) -> dict {
             user_prompt=prompt,
             use_llm=command == "prompt-llm",
         );
-        return prompt_result.reports[0].to_dict();
+        workflow: dict = prompt_result.reports[0].to_dict();
+        validate_generated_workflow(workflow);
+        return workflow;
     }
     if command == "llm-transform" {
         return {
@@ -53,11 +62,71 @@ def run_command(command: str, payload: dict) -> dict {
         };
     }
     if command == "plan" {
+        validate_workflow(payload);
         return {"plan": plan_workflow(payload)};
     }
     if command == "code" {
+        validate_workflow(payload);
         code_result = root spawn JacCodeGeneratorWalker(workflow=payload);
         return {"source": code_result.reports[0]};
+    }
+    if command == "validate" {
+        return validate_workflow(payload);
+    }
+    if command == "validate-generated" {
+        return validate_generated_workflow(payload);
+    }
+    if command == "storage-save" {
+        return {
+            "record": save_workflow(
+                str(payload.get("name", "")),
+                payload.get("workflow", {}) as dict,
+                str(payload.get("dataDir", "")),
+            ).to_dict()
+        };
+    }
+    if command == "storage-create" {
+        return {
+            "record": create_workflow(
+                str(payload.get("name", "")),
+                payload.get("workflow", {}) as dict,
+                str(payload.get("dataDir", "")),
+            ).to_dict()
+        };
+    }
+    if command == "storage-load" {
+        return {
+            "record": load_workflow(
+                str(payload.get("name", "")),
+                str(payload.get("dataDir", "")),
+            ).to_dict()
+        };
+    }
+    if command == "storage-list" {
+        return {
+            "records": [
+                record.to_dict()
+                for record in list_workflows(
+                    str(payload.get("dataDir", ""))
+                )
+            ]
+        };
+    }
+    if command == "storage-delete" {
+        return {
+            "deleted": delete_workflow(
+                str(payload.get("name", "")),
+                str(payload.get("dataDir", "")),
+            )
+        };
+    }
+    if command == "storage-trace" {
+        return {
+            "fileName": save_trace(
+                payload.get("trace", {}) as dict,
+                str(payload.get("dataDir", "")),
+            )
+        };
     }
     if command == "mac-policy" {
         app: str = str(payload.get("app", ""));

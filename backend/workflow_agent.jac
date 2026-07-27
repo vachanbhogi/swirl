@@ -515,12 +515,22 @@ def prompt_to_workflow_rules(user_prompt: str) -> WorkflowAst {
                 "eventType": "trigger_sms", "runMode": "continuous",
                 "phoneNumber": "8604644276", "checkIntervalSec": 1
             }),
-            _node("node-p1", "mac_notification", "Mac Notification", "mac", 440, 140, {
+            _node("node-p2", "llm_summarize", "Action Brief", "ai", 400, 140, {
+                "prompt": "Turn this self-text into a concise action brief. Preserve the request, identify clear next steps, and never claim an action was executed.",
+                "maxTokens": 400, "temperature": 0.1
+            }),
+            _node("node-p3", "mac_notes", "Apple Notes", "mac", 760, 80, {
+                "app": "Notes", "action": "create_note",
+                "folder": "Swirl Action Items", "noteStyle": "actionBrief"
+            }),
+            _node("node-p4", "mac_notification", "Mac Notification", "mac", 760, 260, {
                 "app": "System", "action": "display_notification", "sound": "Glass"
             }),
         ];
         edges = [
-            _edge("edge-source-p1", "workflow-source", "node-p1"),
+            _edge("edge-source-p2", "workflow-source", "node-p2"),
+            _edge("edge-p2-p3", "node-p2", "node-p3"),
+            _edge("edge-p2-p4", "node-p2", "node-p4"),
         ];
     } elif "email" in lowered or "mail" in lowered {
         nodes = [
