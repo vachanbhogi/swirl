@@ -15,8 +15,10 @@ import from .data {
     INITIAL_NODES,
     INITIAL_EDGES,
     change_source_event,
+    generated_tool_palette_block,
     normalize_workflow,
     suggest_generated_workflow_name,
+    trigger_block_library,
 }
 import from .native_bridge {
     compile_workflow_prompt,
@@ -27,6 +29,10 @@ import from .native_bridge {
     delete_workflow,
     is_tauri_environment,
     listen_to_workflow_events,
+    list_generated_tools,
+    archive_generated_tool,
+    check_generated_tool,
+    resolve_workflow_approval,
     start_workflow,
     stop_workflow,
 }
@@ -45,6 +51,11 @@ def timestamp_ms -> int {
     date_constructor: any = Date;  # jac:ignore[W2001]
     date_value: any = new(date_constructor);
     return int(date_value.getTime());
+}
+
+
+def generated_tool_block(record: dict) -> dict {
+    return generated_tool_palette_block(record);
 }
 
 
@@ -72,6 +83,11 @@ def:pub SwirlApp -> JsxElement {
     has has_unsaved_changes: bool = False;
     has is_saving: bool = False;
     has save_error: str | None = None;
+    has generated_tools: list = [];
+    has tool_builder_prompt: str = "";
+    has approval_request: dict | None = None;
+    has is_resolving_approval: bool = False;
+    has tool_catalog_error: str | None = None;
 
     has terminal_run_ids: Ref[set[str]] = Ref(set());
     has auto_save_timer: Ref[any] = Ref(None);
@@ -136,6 +152,13 @@ def:pub SwirlApp -> JsxElement {
             "prefix": event.event,
             "message": event.message or event.title or "Workflow event received",
         });
+        if event.event == "approval_required" and event.output {
+            request_value: dict = event.output as dict;
+            if request_value.get("approvalId") {
+                approval_request = request_value;
+                is_resolving_approval = False;
+            }
+        }
         if event.nodeId {
             active_node_id = str(event.nodeId);
             set_node_status(event);
@@ -152,6 +175,16 @@ def:pub SwirlApp -> JsxElement {
             execution_results = next_results;
         }
         if event.event in ["complete", "failed", "stopped"] {
+            if (
+                approval_request
+                and (
+                    not event.runId
+                    or approval_request.get("runId") == event.runId
+                )
+            ) {
+                approval_request = None;
+                is_resolving_approval = False;
+            }
             if event.runId and terminal_run_ids.current {
                 terminal_run_ids.current.add(str(event.runId));
             }
@@ -194,6 +227,21 @@ def:pub SwirlApp -> JsxElement {
         }
     }
 
+    async def refresh_generated_tool_list -> None {
+        if not is_tauri_environment() { return; }
+        try {
+            generated_tools = await list_generated_tools() or [];
+            tool_catalog_error = None;
+        } except Exception as error {
+            tool_catalog_error = str(error);
+            console_object: any = console;  # jac:ignore[W2001]
+            console_object.error(
+                "[ToolCatalog] Failed to list generated tools:",
+                error,
+            );
+        }
+    }
+
     async can with entry {
         if is_tauri_environment() {
             try {
@@ -204,6 +252,7 @@ def:pub SwirlApp -> JsxElement {
                     );
                     _ = await save_workflow("Starter Workflow", starter);
                 }
+                await refresh_generated_tool_list();
             } except Exception as error {
                 console_object: any = console;  # jac:ignore[W2001]
                 console_object.error(
@@ -345,6 +394,26 @@ def:pub SwirlApp -> JsxElement {
         x: float,
         y: float,
     ) {
+        if block_definition.get("category") == "trigger" {
+            next_nodes: list = [];
+            for workflow_node in nodes {
+                if workflow_node.get("category") == "source" {
+                    current_config: dict = workflow_node.get("config", {}) as dict;
+                    next_nodes.append({
+                        **workflow_node,
+                        "config": change_source_event(
+                            str(block_definition["type"]),
+                            current_config,
+                        ),
+                    });
+                    selected_node_id = str(workflow_node["id"]);
+                } else {
+                    next_nodes.append(workflow_node);
+                }
+            }
+            nodes = next_nodes;
+            return;
+        }
         position: dict = {"x": x, "y": y};
         new_node: dict = {
             "id": "node-" + str(timestamp_ms()),
@@ -359,6 +428,13 @@ def:pub SwirlApp -> JsxElement {
             "config": {**(block_definition["config"] as dict)},
             "status": "idle",
         };
+        if block_definition.get("toolRef") {
+            new_node = {
+                **new_node,
+                "toolRef": block_definition["toolRef"],
+                "toolSnapshot": block_definition["toolSnapshot"],
+            };
+        }
         nodes = nodes + [new_node];
         selected_node_id = str(new_node["id"]);
     }
@@ -441,7 +517,11 @@ def:pub SwirlApp -> JsxElement {
                 for workflow_node in (workflow["nodes"] as list)
             ];
             edges = workflow["edges"] as list;
-            started = await start_workflow(workflow);
+            started = await start_workflow(
+                workflow,
+                {},
+                [],
+            );
             run_id: str = str(started.runId);
             if (
                 terminal_run_ids.current
@@ -486,6 +566,159 @@ def:pub SwirlApp -> JsxElement {
                 "message": str(error),
             });
         }
+    }
+
+    async def handle_resolve_approval(approved: bool) -> None {
+        if not approval_request or is_resolving_approval { return; }
+        is_resolving_approval = True;
+        try {
+            _ = await resolve_workflow_approval({
+                "approvalId": approval_request["approvalId"],
+                "runId": approval_request["runId"],
+                "iteration": approval_request["iteration"],
+                "toolFingerprint": approval_request["toolFingerprint"],
+                "argumentDigest": approval_request["argumentDigest"],
+                "approved": approved,
+            });
+            append_log({
+                "time": local_time(),
+                "type": "info" if approved else "error",
+                "prefix": "approval",
+                "message": (
+                    "One-time approval granted; running the reviewed tool."
+                    if approved
+                    else "Tool execution cancelled with no action performed."
+                ),
+            });
+            approval_request = None;
+        } except Exception as error {
+            append_log({
+                "time": local_time(),
+                "type": "error",
+                "prefix": "approval",
+                "message": str(error),
+            });
+        } finally {
+            is_resolving_approval = False;
+        }
+    }
+
+    async def handle_generated_tool_saved(
+        record: dict,
+        add_to_canvas: bool,
+    ) -> None {
+        await refresh_generated_tool_list();
+        # CodeBlockPalette adds the reviewed block after this callback. Keeping
+        # catalog refresh here avoids inserting the same node twice.
+        tool_builder_prompt = "";
+        append_log({
+            "time": local_time(),
+            "type": "success",
+            "prefix": "tool",
+            "message": "Saved " + str(record.get("name", "generated tool"))
+                + (" and added it to the canvas." if add_to_canvas else " to My Tools."),
+        });
+    }
+
+    async def handle_archive_generated_tool(tool_value: any) -> None {
+        tool_id: str = (
+            str(tool_value.get("id", ""))
+            if isinstance(tool_value, dict)
+            else str(tool_value)
+        );
+        try {
+            _ = await archive_generated_tool(tool_id);
+            await refresh_generated_tool_list();
+            append_log({
+                "time": local_time(),
+                "type": "info",
+                "prefix": "tool",
+                "message": "Archived the tool. Existing pinned blocks were kept.",
+            });
+        } except Exception as error {
+            append_log({
+                "time": local_time(),
+                "type": "error",
+                "prefix": "tool",
+                "message": str(error),
+            });
+        }
+    }
+
+    async def handle_check_generated_tool(tool_value: any) -> any {
+        tool_id: str = (
+            str(tool_value.get("id", ""))
+            if isinstance(tool_value, dict)
+            else str(tool_value)
+        );
+        try {
+            result = await check_generated_tool(tool_id, None);
+            append_log({
+                "time": local_time(),
+                "type": "success" if result.status == "ready" else "info",
+                "prefix": "connection",
+                "message": str(result.message or "Connection check completed without performing an action."),
+            });
+            return result;
+        } except Exception as error {
+            append_log({
+                "time": local_time(),
+                "type": "error",
+                "prefix": "connection",
+                "message": str(error),
+            });
+            raise error;
+        }
+    }
+
+    def handle_create_tool_from_prompt(prompt: str) {
+        tool_builder_prompt = prompt;
+        active_tab = "workflow";
+        editing_workflow = True;
+        selected_node_id = None;
+    }
+
+    def handle_convert_legacy_app_agent(workflow_node: dict) {
+        legacy_config: dict = workflow_node.get("config", {}) as dict;
+        application: str = str(legacy_config.get("application", "the selected application"));
+        instruction: str = str(legacy_config.get("prompt", "perform the configured action"));
+        tool_builder_prompt = "Make a tool for " + application + " that " + instruction;
+        selected_node_id = None;
+        append_log({
+            "time": local_time(),
+            "type": "info",
+            "prefix": "legacy",
+            "message": "Opened a safe reusable-tool draft. The legacy block remains unchanged until you replace it.",
+        });
+    }
+
+    def handle_update_tool_version(node_id: str, record: dict) {
+        block: dict = generated_tool_block(record);
+        next_nodes: list = [];
+        for workflow_node in nodes {
+            if workflow_node["id"] == node_id {
+                old_bindings: dict = (
+                    workflow_node.get("config", {}).get("bindings", {}) as dict
+                );
+                next_bindings: dict = block.get("config", {}).get("bindings", {}) as dict;
+                for binding_key in (Object.keys(next_bindings) as list) {  # jac:ignore[W2001,W6002]
+                    if binding_key in old_bindings {
+                        next_bindings[binding_key] = old_bindings[binding_key];
+                    }
+                }
+                next_nodes.append({
+                    **workflow_node,
+                    "title": block["title"],
+                    "toolRef": block["toolRef"],
+                    "toolSnapshot": block["toolSnapshot"],
+                    "config": {"bindings": next_bindings},
+                    "status": "idle",
+                });
+            } else {
+                next_nodes.append(workflow_node);
+            }
+        }
+        nodes = next_nodes;
     }
 
     async def handle_generate_from_prompt(prompt: str) -> None {
@@ -606,6 +839,14 @@ def:pub SwirlApp -> JsxElement {
         }
     }
     if selected_node { active_node = selected_node; }
+    available_tool_updates: dict = {};
+    for tool_value in generated_tools {
+        tool_record: dict = tool_value as dict;
+        tool_id: str = str(tool_record.get("id", ""));
+        if tool_id and not bool(tool_record.get("archived", False)) {
+            available_tool_updates[tool_id] = tool_record;
+        }
+    }
     show_editor: bool = active_tab == "workflow" and editing_workflow;
     show_manager: bool = active_tab == "workflow" and not editing_workflow;
 
@@ -664,14 +905,25 @@ def:pub SwirlApp -> JsxElement {
                             total_nodes={len(nodes)}
                             total_edges={len(edges)}
                             on_run_workflow={handle_run_workflow}
+                            available_tool_updates={available_tool_updates}
+                            on_update_tool_version={handle_update_tool_version}
+                            on_convert_legacy_app_agent={handle_convert_legacy_app_agent}
                         />
                     } else {
                         <CodeBlockPalette
                             key="block-palette"
-                            blocks={BLOCK_LIBRARY}
+                            blocks={BLOCK_LIBRARY + trigger_block_library()}
                             on_add_block={lambda (block: dict) {
                                 handle_drop_new_block(block, 260.0, 200.0);
                             }}
+                            generated_tools={generated_tools}
+                            tool_builder_prompt={tool_builder_prompt}
+                            on_tool_builder_closed={lambda {
+                                tool_builder_prompt = "";
+                            }}
+                            on_generated_tool_saved={handle_generated_tool_saved}
+                            on_archive_generated_tool={handle_archive_generated_tool}
+                            on_check_generated_tool={handle_check_generated_tool}
                         />
                     }}
                 </div>
@@ -692,6 +944,7 @@ def:pub SwirlApp -> JsxElement {
                 on_generate_from_prompt={handle_generate_from_prompt}
                 is_compiling_prompt={is_compiling_prompt}
                 on_switch_to_workflow={lambda { active_tab = "workflow"; }}
+                on_create_tool_from_prompt={handle_create_tool_from_prompt}
                 compile_status={compile_status}
             />
         }}
@@ -706,6 +959,85 @@ def:pub SwirlApp -> JsxElement {
                 execution_results={execution_results}
                 on_clear_logs={clear_logs}
             />
+        }}
+
+        {if approval_request {
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-end justify-center p-4 sm:p-8">
+                <section
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="tool-approval-title"
+                    aria-describedby="tool-approval-description"
+                    className="w-full max-w-xl rounded-2xl bg-zinc-950 border border-zinc-700 p-5 text-left"
+                >
+                    <div className="flex items-start justify-between gap-4 pb-4 border-b border-zinc-800">
+                        <div>
+                            <p className="text-[11px] font-mono text-cyan-400">
+                                One-time approval · iteration {approval_request.get("iteration", 1)}
+                            </p>
+                            <h2 id="tool-approval-title" className="mt-1 text-base font-semibold text-white">
+                                Allow this tool to control {approval_request.get("application", "the selected app")}?
+                            </h2>
+                            <p id="tool-approval-description" className="mt-1 text-xs leading-relaxed text-zinc-400">
+                                This approval is bound to this run, tool fingerprint, and resolved inputs. Values stay redacted and the approval cannot be reused.
+                            </p>
+                        </div>
+                        <span className="rounded-full bg-amber-950 px-2 py-1 text-[10px] font-semibold capitalize text-amber-300">
+                            {str(approval_request.get("risk", "high"))} risk
+                        </span>
+                    </div>
+
+                    <div className="py-4 space-y-3 max-h-[45vh] overflow-y-auto">
+                        <div>
+                            <h3 className="text-[11px] font-semibold text-zinc-300">External effects</h3>
+                            <ul className="mt-1.5 space-y-1.5">
+                                {for effect_value in (approval_request.get("effects", []) as list) {
+                                    effect: dict = effect_value as dict;
+                                    <li key={str(effect.get("type", effect.get("description", "effect")))} className="text-xs leading-relaxed text-zinc-400">
+                                        • {effect.get("description", effect.get("type", "Controls the target application"))}
+                                    </li>
+                                }}
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 className="text-[11px] font-semibold text-zinc-300">Required permissions</h3>
+                            <p className="mt-1 text-xs text-zinc-400">
+                                {", ".join([str(value) for value in (approval_request.get("permissions", []) as list)]) or "macOS Automation and Accessibility"}
+                            </p>
+                        </div>
+                        {if approval_request.get("program") {
+                            <details className="rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-2.5">
+                                <summary className="cursor-pointer text-xs font-medium text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+                                    Review validated automation steps
+                                </summary>
+                                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[10px] leading-relaxed text-zinc-400 font-mono select-text">{
+                                    JSON.stringify(approval_request["program"], None, 2)  # jac:ignore[W2001,W6002]
+                                }</pre>
+                            </details>
+                        }}
+                    </div>
+
+                    <div className="pt-4 border-t border-zinc-800 flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            autoFocus={True}
+                            disabled={is_resolving_approval}
+                            onClick={lambda { handle_resolve_approval(False); }}
+                            className="rounded-xl bg-zinc-800 hover:bg-zinc-700 px-4 py-2.5 text-xs font-semibold text-zinc-200 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            disabled={is_resolving_approval}
+                            onClick={lambda { handle_resolve_approval(True); }}
+                            className="rounded-xl bg-cyan-600 hover:bg-cyan-500 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                        >
+                            {"Resolving…" if is_resolving_approval else "Run once"}
+                        </button>
+                    </div>
+                </section>
+            </div>
         }}
     </div>;
 }
