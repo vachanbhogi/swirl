@@ -9,7 +9,9 @@ import from "lucide-react" {
     Bot,
     Cpu,
     ArrowLeft,
+    Wrench,
 }
+import from .data { is_tool_creation_intent }
 
 glob PRESET_PROMPTS: list[dict] = [
     {
@@ -30,6 +32,12 @@ glob PRESET_PROMPTS: list[dict] = [
         "description": "Fetch a web page on a morning schedule, summarize it, and deliver a Mac notification.",
         "prompt": "Every day at 8:00 AM, fetch https://example.com with MCP, summarize the page using Jac AI, and send a Mac notification.",
     },
+    {
+        "title": "Discord Message Tool",
+        "icon": "🛠️",
+        "description": "Create a reusable action with Friend and Message inputs for Discord.",
+        "prompt": "Make a tool to text a friend on Discord for me.",
+    },
 ];
 
 
@@ -37,6 +45,7 @@ def:pub AIScreen(
     on_generate_from_prompt: Callable[[str], any],
     is_compiling_prompt: bool,
     on_switch_to_workflow: Callable[[], any],
+    on_create_tool_from_prompt: Callable[[str], any] | None = None,
     compile_status: dict = {"type": "idle", "message": ""},
 ) -> JsxElement {
     has prompt_text: str = "";
@@ -44,12 +53,19 @@ def:pub AIScreen(
     def handle_submit(event: FormEvent) {
         event.preventDefault();
         if prompt_text.strip() and not is_compiling_prompt {
-            on_generate_from_prompt(prompt_text);
+            if is_tool_creation_intent(prompt_text) and on_create_tool_from_prompt {
+                on_create_tool_from_prompt(prompt_text);
+            } else {
+                on_generate_from_prompt(prompt_text);
+            }
         }
     }
 
     status_message: str = str(compile_status["message"] or "");
     status_type: str = str(compile_status["type"] or "idle");
+    creates_tool: bool = bool(
+        on_create_tool_from_prompt and is_tool_creation_intent(prompt_text)
+    );
 
     return <div className="flex-1 w-full h-full bg-[#050508] text-white flex flex-col overflow-hidden font-sans select-none">
         <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
@@ -103,6 +119,9 @@ def:pub AIScreen(
                                 {if is_compiling_prompt {
                                     <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
                                     <span>Compiling...</span>
+                                } elif creates_tool {
+                                    <Wrench className="w-4 h-4 text-cyan-700" />
+                                    <span>Make Tool</span>
                                 } else {
                                     <Wand2 className="w-4 h-4 text-purple-600" />
                                     <span>Generate Workflow</span>
@@ -110,6 +129,13 @@ def:pub AIScreen(
                             </button>
                         </div>
                     </div>
+
+                    {if creates_tool {
+                        <p role="status" className="flex items-center justify-center gap-1.5 text-[11px] text-cyan-300">
+                            <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
+                            This request will open the reusable Tool Builder in Actions.
+                        </p>
+                    }}
 
                     {if status_message {
                         <div
@@ -145,7 +171,7 @@ def:pub AIScreen(
                     <h3 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500 px-1">
                         Starter Templates
                     </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {for (index, preset) in enumerate(PRESET_PROMPTS) {
                             <button
                                 key={str(index)}
