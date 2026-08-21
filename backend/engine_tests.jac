@@ -2,7 +2,10 @@ import os;
 import from backend.workflow_agent {
     compile_llm_workflow, prompt_to_workflow_rules, plan_workflow,
     workflow_draft_to_ast,
-    WorkflowDraft, WorkflowNodeDraft, WorkflowEdgeDraft
+    PromptToWorkflowWalker, WorkflowDraft, WorkflowNodeDraft,
+    WorkflowEdgeDraft, GeneratedAppToolDraft, GeneratedToolInput,
+    GeneratedToolStep, GeneratedToolEffect, validate_app_tool_draft,
+    is_app_tool_prompt
 }
 import from backend.mac_control {
     classify_mac_action, validate_mac_action
@@ -12,6 +15,8 @@ import from backend.mcp_bridge {
     builtin_mcp_servers, builtin_mcp_server
 }
 import from backend.code_generator { generate_jac_source }
+import from backend.models { validate_workflow }
+import from backend.storage { workflow_with_positions }
 
 
 test "prompt compiler creates connected desktop workflow" {
@@ -22,6 +27,136 @@ test "prompt compiler creates connected desktop workflow" {
     assert len(ast.edges) == 2;
     assert ast.nodes[0]["category"] == "source";
     assert ast.nodes[1]["category"] == "mac";
+}
+
+
+test "prompt walker exposes the generated workflow directly" {
+    result = root spawn PromptToWorkflowWalker(
+        user_prompt="When a new email arrives, summarize it"
+    );
+    assert result.generated is not None;
+    assert result.generated.nodes[0]["config"]["eventType"] == "trigger_email";
+}
+
+
+test "App Agents are valid workflow actions" {
+    workflow = {
+        "nodes": [
+            {
+                "id": "workflow-source",
+                "type": "source",
+                "title": "Source",
+                "category": "source",
+                "config": {"eventType": "trigger_email", "runMode": "once"},
+            },
+            {
+                "id": "app-agent",
+                "type": "mac_app_agent",
+                "title": "Discord Agent",
+                "category": "mac",
+                "config": {
+                    "application": "Discord",
+                    "prompt": "Open my DM with Alex and send: Running late.",
+                },
+            },
+        ],
+        "edges": [{
+            "id": "source-agent",
+            "source": "workflow-source",
+            "target": "app-agent",
+        }],
+    };
+    validated = validate_workflow(workflow);
+    assert validated["valid"];
+    assert plan_workflow(workflow)[1]["type"] == "mac_app_agent";
+}
+
+
+test "generated application tool drafts use safe typed operations" {
+    draft = GeneratedAppToolDraft(
+        name="Send Discord DM",
+        description="Send a direct message to a selected Discord recipient.",
+        application_query="Discord",
+        inputs=[
+            GeneratedToolInput(key="recipient", label="Recipient"),
+            GeneratedToolInput(key="message", label="Message"),
+        ],
+        program=[
+            GeneratedToolStep(op="activate_app"),
+            GeneratedToolStep(op="wait_frontmost"),
+            GeneratedToolStep(op="key_chord", keys=["command", "k"]),
+            GeneratedToolStep(
+                op="wait_element", role="AXTextField", timeout_sec=5.0
+            ),
+            GeneratedToolStep(op="type_input", input_key="recipient"),
+            GeneratedToolStep(op="press_key", key="return"),
+            GeneratedToolStep(op="type_input", input_key="message"),
+            GeneratedToolStep(op="press_key", key="return"),
+        ],
+        effects=[GeneratedToolEffect(
+            effect_type="send", description="Sends one Discord message",
+            requires_approval=True
+        )],
+        permissions=["Automation", "Accessibility"],
+        risk="medium",
+    );
+    validation = validate_app_tool_draft(draft);
+    assert validation["valid"];
+    assert draft.to_dict("Make a tool to text my friend on Discord")["program"][4]["inputKey"] == "recipient";
+    assert is_app_tool_prompt("Make a tool to text my friend on Discord");
+    assert not is_app_tool_prompt("Every morning summarize my inbox");
+}
+
+
+test "generated application tool workflow pins snapshot and position" {
+    fingerprint: str = "a" * 64;
+    workflow = {
+        "nodes": [
+            {
+                "id": "workflow-source", "type": "source",
+                "title": "On Run", "category": "source", "config": {}
+            },
+            {
+                "id": "discord-tool", "type": "generated_app_tool",
+                "title": "Send Discord DM", "category": "mac",
+                "toolRef": {
+                    "id": "tool-discord", "version": 1,
+                    "fingerprint": fingerprint
+                },
+                "toolSnapshot": {
+                    "target": {"bundleId": "com.hnc.Discord"},
+                    "inputs": [
+                        {"key": "recipient", "sensitive": True},
+                        {"key": "message", "sensitive": True}
+                    ],
+                    "program": [
+                        {"op": "activate_app"}, {"op": "wait_frontmost"}
+                    ],
+                    "effects": [{"type": "send", "requiresApproval": True}],
+                },
+                "config": {"bindings": {
+                    "recipient": {
+                        "kind": "literal", "value": "Private recipient"
+                    },
+                    "message": {"kind": "context", "path": "text"},
+                }},
+                "position": {"x": 260.0, "y": 200.0},
+            },
+        ],
+        "edges": [{
+            "id": "source-tool", "source": "workflow-source",
+            "target": "discord-tool"
+        }],
+    };
+    assert validate_workflow(workflow)["valid"];
+    planned = plan_workflow(workflow);
+    assert planned[1]["toolRef"]["version"] == 1;
+    assert planned[1]["position"]["x"] == 260.0;
+    source = generate_jac_source(workflow);
+    assert "tool_ref=" in source;
+    assert "tool_snapshot=" in source;
+    assert "position=" in source;
+    assert "Private recipient" not in source;
 }
 
 
