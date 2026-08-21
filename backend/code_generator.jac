@@ -42,6 +42,50 @@ def safe_var(node_id: str) -> str {
 }
 
 
+def codegen_config(value: dict, tool_snapshot: dict = {}) -> dict {
+    safe: dict = {};
+    forbidden: set[str] = {
+        "preparedScript", "preparedExplanation", "runtimeScript",
+        "approvalToken", "approvalTokens", "runtimeValues",
+        "resolvedArguments"
+    };
+    for key in value {
+        if key not in forbidden {
+            safe[key] = value[key];
+        }
+    }
+    bindings_value: any = safe.get("bindings", {});
+    inputs_value: any = tool_snapshot.get("inputs", []);
+    if isinstance(bindings_value, dict) and isinstance(inputs_value, list) {
+        sensitive: set[str] = set();
+        for input_value in (inputs_value as list) {
+            if (
+                isinstance(input_value, dict)
+                and bool((input_value as dict).get("sensitive", False))
+            ) {
+                sensitive.add(str((input_value as dict).get("key", "")));
+            }
+        }
+        sanitized_bindings: dict = {};
+        for binding_key in (bindings_value as dict) {
+            binding: dict = (bindings_value as dict)[binding_key] as dict;
+            if (
+                binding_key in sensitive
+                and str(binding.get("kind", "")) == "literal"
+            ) {
+                sanitized_bindings[binding_key] = {
+                    **binding, "value": ""
+                };
+            } else {
+                sanitized_bindings[binding_key] = binding;
+            }
+        }
+        safe["bindings"] = sanitized_bindings;
+    }
+    return safe;
+}
+
+
 def generate_jac_source(workflow: dict) -> str {
     nodes: list = workflow.get("nodes", []) as list;
     edges: list = workflow.get("edges", []) as list;
@@ -63,7 +107,27 @@ def generate_jac_source(workflow: dict) -> str {
         declaration += "title=" + jac_string(str(spec.get("title", node_id))) + ", ";
         declaration += "category=" + jac_string(category) + ", ";
         declaration += "custom_prompt=" + jac_string(str(spec.get("customPrompt", ""))) + ", ";
-        declaration += "config=" + jac_dict(spec.get("config", {}) as dict) + ");";
+        declaration += "config=" + jac_dict(
+            codegen_config(
+                spec.get("config", {}) as dict,
+                spec.get("toolSnapshot", {}) as dict,
+            )
+        ) + ", ";
+        declaration += "tool_ref=" + jac_dict(
+            spec.get("toolRef", {}) as dict
+        ) + ", ";
+        declaration += "tool_snapshot=" + jac_dict(
+            spec.get("toolSnapshot", {}) as dict
+        ) + ", ";
+        position: dict = (
+            spec.get("position") as dict
+            if isinstance(spec.get("position"), dict)
+            else {
+                "x": float(spec.get("x", 250.0)),
+                "y": float(spec.get("y", 180.0)),
+            }
+        );
+        declaration += "position=" + jac_dict(position) + ");";
         lines.append(declaration);
         incoming[node_id] = 0;
         outgoing[node_id] = [];
