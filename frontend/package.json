@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "cd .. && jac start --dev main.jac --port 5173",
+    "dev": "cd .. && jac start --dev main.jac --port 14217",
     "build": "cd .. && jac build main.jac --client web",
     "test": "cd .. && jac clean --data --force && jac test backend/engine_tests.jac -v",
     "tauri:dev": "tauri dev",

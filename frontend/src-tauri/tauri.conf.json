@@ -5,7 +5,7 @@
   "identifier": "com.swirl.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:14217",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../../.jac/client/dist"
   },
@@ -44,7 +44,7 @@
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost",
-      "devCsp": "default-src 'self' http://localhost:5173; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval' http://localhost:5173; connect-src ipc: http://ipc.localhost https://ipc.localhost http://localhost:5173 ws://localhost:5173"
+      "devCsp": "default-src 'self' http://localhost:14217; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval' http://localhost:14217; connect-src ipc: http://ipc.localhost https://ipc.localhost http://localhost:14217 ws://localhost:14217"
     }
   },
   "bundle": {
