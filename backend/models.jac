@@ -13,10 +13,13 @@ glob SUPPORTED_BLOCKS: set[str] = {
     "mcp_fetch",
     "mcp_fs",
     "mcp_search",
+    "mac_app_agent",
+    "generated_app_tool",
     "output_slack",
 };
 
 glob GENERATED_SOURCE_EVENTS: set[str] = {
+    "trigger_manual",
     "trigger_email",
     "trigger_file",
     "trigger_cron",
@@ -102,6 +105,32 @@ obj WorkflowDocument {
             if category == "source" {
                 source_count += 1;
                 source_id = node_id;
+                source_config: dict = node.get("config", {}) as dict;
+                source_event: str = str(
+                    source_config.get("eventType", "trigger_manual")
+                );
+                if source_event not in GENERATED_SOURCE_EVENTS {
+                    raise ValueError(
+                        f"Unsupported Source event type: {source_event}"
+                    );
+                }
+                source_run_mode: str = str(
+                    source_config.get("runMode", "once")
+                );
+                if source_run_mode not in {"once", "continuous"} {
+                    raise ValueError("Source runMode must be once or continuous");
+                }
+                if (
+                    source_event == "trigger_manual"
+                    and source_run_mode != "once"
+                ) {
+                    raise ValueError(
+                        "The Run button Source supports one execution per press"
+                    );
+                }
+            }
+            if block_type == "generated_app_tool" {
+                validate_generated_app_tool_node(node);
             }
         }
         if source_count != 1 {
@@ -176,6 +205,82 @@ obj WorkflowDocument {
             raise ValueError(
                 "Every workflow node must be reachable from Source"
             );
+        }
+    }
+}
+
+
+def _is_sha256(value: str) -> bool {
+    if len(value) != 64 {
+        return False;
+    }
+    allowed: set[str] = set("0123456789abcdef");
+    for character in value.lower() {
+        if character not in allowed {
+            return False;
+        }
+    }
+    return True;
+}
+
+
+def validate_generated_app_tool_node(node_spec: dict) {
+    if str(node_spec.get("category", "")) != "mac" {
+        raise ValueError("Generated application tools must use the mac category");
+    }
+    tool_ref: dict = node_spec.get("toolRef", {}) as dict;
+    snapshot: dict = node_spec.get("toolSnapshot", {}) as dict;
+    tool_id: str = str(tool_ref.get("id", "")).strip();
+    if not tool_id or len(tool_id) > 120 {
+        raise ValueError("Generated application tool has an invalid tool ID");
+    }
+    if int(tool_ref.get("version", 0)) < 1 {
+        raise ValueError("Generated application tool version must be a positive integer");
+    }
+    fingerprint: str = str(tool_ref.get("fingerprint", "")).lower();
+    if not _is_sha256(fingerprint) {
+        raise ValueError("Generated application tool fingerprint must be SHA-256");
+    }
+    target: dict = snapshot.get("target", {}) as dict;
+    program: list = snapshot.get("program", []) as list;
+    inputs: list = snapshot.get("inputs", []) as list;
+    effects: list = snapshot.get("effects", []) as list;
+    if not str(target.get("bundleId", "")).strip() {
+        raise ValueError("Pinned application tool target must contain a bundle ID");
+    }
+    if not program {
+        raise ValueError("Pinned application tool snapshot must contain a validated program");
+    }
+    config: dict = node_spec.get("config", {}) as dict;
+    bindings: dict = config.get("bindings", {}) as dict;
+    input_keys: set[str] = set();
+    for input_value in inputs {
+        input_spec: dict = input_value as dict;
+        input_key: str = str(input_spec.get("key", "")).strip();
+        if not input_key or input_key in input_keys {
+            raise ValueError("Generated application tool input keys must be unique and non-empty");
+        }
+        input_keys.add(input_key);
+        if input_key not in bindings {
+            raise ValueError(f"Generated application tool is missing binding: {input_key}");
+        }
+    }
+    for binding_key in bindings {
+        if binding_key not in input_keys {
+            raise ValueError(f"Generated application tool has unknown binding: {binding_key}");
+        }
+        binding: dict = bindings[binding_key] as dict;
+        kind: str = str(binding.get("kind", ""));
+        if kind == "literal" {
+            if binding.get("value") is None {
+                raise ValueError(f"Literal binding {binding_key} is missing value");
+            }
+        } elif kind == "context" {
+            if not str(binding.get("path", "")).strip() {
+                raise ValueError(f"Context binding {binding_key} is missing path");
+            }
+        } else {
+            raise ValueError(f"Binding {binding_key} has unsupported kind: {kind}");
         }
     }
 }
