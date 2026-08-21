@@ -656,6 +656,62 @@ pub fn execute_restricted_applescript(script: &str) -> MacActionResult {
     run_applescript(script, "low")
 }
 
+pub fn execute_generated_app_automation(
+    application: &str,
+    script: &str,
+    approved: bool,
+) -> MacActionResult {
+    let application = application.trim();
+    let script = script.trim();
+    if !approved {
+        return MacActionResult::approval(
+            format!("Approval is required before controlling {application}"),
+            "high",
+        );
+    }
+    if application.is_empty()
+        || application.len() > 100
+        || !application.chars().all(|character| {
+            character.is_alphanumeric() || matches!(character, ' ' | '.' | '-' | '_' | '(' | ')')
+        })
+    {
+        return MacActionResult::failure("Application name is invalid", "high");
+    }
+    if script.is_empty() || script.len() > 16_000 || script.contains("```") || script.contains('\0')
+    {
+        return MacActionResult::failure(
+            "Generated app automation must be 1-16000 characters of plain AppleScript",
+            "high",
+        );
+    }
+    let lowered = script.to_ascii_lowercase();
+    let forbidden = [
+        "do shell script",
+        "tell application \"terminal\"",
+        "tell application \"keychain access\"",
+        "security find-",
+        "sudo ",
+        "curl ",
+        "wget ",
+        "empty trash",
+        "delete every file",
+    ];
+    if forbidden.iter().any(|token| lowered.contains(token)) {
+        return MacActionResult::failure(
+            "Generated app automation contains a blocked system operation",
+            "high",
+        );
+    }
+    let quoted_application = format!("\"{}\"", application.to_ascii_lowercase());
+    if !lowered.contains(&quoted_application) {
+        return MacActionResult::failure(
+            "Generated automation does not target the selected application",
+            "high",
+        );
+    }
+    run_applescript(script, "high")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,6 +733,28 @@ mod tests {
     fn raw_applescript_rejects_shell_escape() {
         let result = execute_restricted_applescript(
             "tell application \"Notes\" to do shell script \"whoami\"",
+        );
+        assert!(!result.success);
+        assert_eq!(result.risk, "high");
+    }
+
+    #[test]
+    fn generated_app_automation_requires_approval() {
+        let result = execute_generated_app_automation(
+            "Discord",
+            "tell application \"Discord\" to activate",
+            false,
+        );
+        assert!(!result.success);
+        assert!(result.approval_required);
+    }
+
+    #[test]
+    fn generated_app_automation_rejects_shell_escape() {
+        let result = execute_generated_app_automation(
+            "Discord",
+            "tell application \"Discord\" to activate\ndo shell script \"whoami\"",
+            true,
         );
         assert!(!result.success);
         assert_eq!(result.risk, "high");
