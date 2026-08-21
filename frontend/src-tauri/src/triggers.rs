@@ -751,8 +751,14 @@ pub fn wait_for_source(
         .config
         .get("eventType")
         .and_then(Value::as_str)
-        .unwrap_or("trigger_email")
+        .unwrap_or("trigger_manual")
     {
+        "trigger_manual" => Ok(Some(SourceEvent {
+            trigger_type: "trigger_manual".into(),
+            timestamp_ms: now_ms(),
+            payload: json!({ "source": "run_button" }),
+            text: String::new(),
+        })),
         "trigger_email" => wait_for_email(node, cancelled),
         "trigger_file" => wait_for_file(node, cancelled),
         "trigger_cron" => wait_for_cron(node, cancelled),
@@ -773,6 +779,25 @@ mod tests {
         assert!(matches_file_pattern(Path::new("/tmp/report.pdf"), "*"));
         assert!(matches_file_pattern(Path::new("/tmp/report.pdf"), "*.pdf"));
         assert!(!matches_file_pattern(Path::new("/tmp/report.txt"), "*.pdf"));
+    }
+
+    #[test]
+    fn manual_source_fires_immediately_from_run_button() {
+        let node: WorkflowNode = serde_json::from_value(json!({
+            "id": "workflow-source",
+            "type": "source",
+            "title": "On Run",
+            "category": "source",
+            "config": { "eventType": "trigger_manual", "runMode": "once" },
+            "position": { "x": 32, "y": 140 }
+        }))
+        .unwrap();
+        let cancelled = AtomicBool::new(false);
+        let event = wait_for_source(&node, &cancelled, &mut SourceState::default())
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.trigger_type, "trigger_manual");
+        assert_eq!(event.payload["source"], "run_button");
     }
 
     #[test]

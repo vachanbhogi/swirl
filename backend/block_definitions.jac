@@ -277,7 +277,7 @@ def default_starter_workflow() -> dict {
                 "category": "source",
                 "x": 60, 
                 "y": 120, 
-                "config": {"eventType": "trigger_email", "runMode": "once", "mailbox": "Inbox", "filterSubject": "", "checkIntervalSec": 15, "waitTimeoutSec": 0},
+                "config": {"eventType": "trigger_manual", "runMode": "once"},
                 "status": "idle"
             },
         ],
