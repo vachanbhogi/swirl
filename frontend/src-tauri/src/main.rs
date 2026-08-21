@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_tools;
 mod jac_runtime;
 mod macos;
 mod mcp;
@@ -11,23 +12,60 @@ mod triggers;
 use macos::{MacActionRequest, MacActionResult};
 use mcp::{McpManager, McpServerConfig, McpState};
 use models::{
-    ExecutionEvent, ExecutionSummary, WorkflowDocument, WorkflowExecutionRequest, WorkflowNode,
+    ExecutionEvent, ExecutionSummary, GeneratedAppToolRecord, GeneratedAppToolVersion,
+    GeneratedToolRef, GeneratedToolSnapshot, WorkflowDocument, WorkflowExecutionRequest,
+    WorkflowNode,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const WORKFLOW_EVENT: &str = "swirl-workflow-event";
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
+static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
 struct WorkflowRunState(Mutex<HashMap<String, Arc<AtomicBool>>>);
+
+#[derive(Clone)]
+struct PendingApproval {
+    run_id: String,
+    iteration: u64,
+    tool_fingerprint: String,
+    argument_digest: String,
+    decision: Arc<(Mutex<Option<bool>>, Condvar)>,
+}
+
+#[derive(Default)]
+struct WorkflowApprovalState(Mutex<HashMap<String, PendingApproval>>);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalResolution {
+    approval_id: String,
+    run_id: String,
+    iteration: u64,
+    tool_fingerprint: String,
+    argument_digest: String,
+    approved: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalResolutionResult {
+    resolved: bool,
+    approval_id: String,
+    approved: bool,
+}
 
 fn emit(app: &AppHandle, event: ExecutionEvent) {
     let _ = app.emit(WORKFLOW_EVENT, event);
@@ -69,6 +107,273 @@ fn run_event(
 
 fn context_object(value: Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
+}
+
+fn output_summary(value: &Value) -> String {
+    match value {
+        Value::Object(object) => {
+            let mut keys = object.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            format!("object keys=[{}]", keys.join(", "))
+        }
+        Value::Array(items) => format!("array length={}", items.len()),
+        Value::String(text) => format!("text length={}", text.chars().count()),
+        Value::Number(_) => "number".into(),
+        Value::Bool(_) => "boolean".into(),
+        Value::Null => "null".into(),
+    }
+}
+
+fn redacted_trace_summary(summary: &ExecutionSummary) -> Value {
+    let mut context_keys = summary
+        .context
+        .as_object()
+        .map(|context| context.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    context_keys.sort();
+    let results = summary
+        .results
+        .iter()
+        .map(|(node_id, value)| (node_id.clone(), Value::String(output_summary(value))))
+        .collect::<Map<String, Value>>();
+    json!({
+        "success": summary.success,
+        "contextKeys": context_keys,
+        "results": results,
+        "completedNodeIds": summary.completed_node_ids,
+        "failedNodeId": summary.failed_node_id,
+        "valuesRedacted": true,
+    })
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+fn tool_error(message: impl Into<String>, approval_required: bool) -> MacActionResult {
+    MacActionResult {
+        success: false,
+        output: None,
+        error: Some(message.into()),
+        approval_required,
+        risk: "high".into(),
+    }
+}
+
+fn context_value_at_path<'a>(context: &'a Map<String, Value>, path: &str) -> Option<&'a Value> {
+    let mut parts = path.split('.').filter(|part| !part.is_empty());
+    let first = parts.next()?;
+    let mut current = context.get(first)?;
+    for part in parts {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+fn binding_value_as_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+fn resolve_generated_tool_arguments(
+    node: &WorkflowNode,
+    context: &Map<String, Value>,
+) -> Result<HashMap<String, String>, MacActionResult> {
+    let snapshot = node
+        .tool_snapshot
+        .as_ref()
+        .ok_or_else(|| tool_error("Generated tool node is missing its pinned snapshot", false))?;
+    let bindings = node.config.get("bindings").and_then(Value::as_object);
+    let mut values = HashMap::new();
+    for input in &snapshot.inputs {
+        let binding = bindings.and_then(|items| items.get(&input.key));
+        let value = match binding.and_then(Value::as_object).and_then(|item| {
+            item.get("kind")
+                .and_then(Value::as_str)
+                .map(|kind| (kind, item))
+        }) {
+            Some(("literal", item)) => item
+                .get("value")
+                .map(binding_value_as_string)
+                .unwrap_or_default(),
+            Some(("context", item)) => {
+                let path = item.get("path").and_then(Value::as_str).unwrap_or("");
+                context_value_at_path(context, path)
+                    .map(binding_value_as_string)
+                    .unwrap_or_default()
+            }
+            Some((kind, _)) => {
+                return Err(tool_error(
+                    format!(
+                        "Input '{}' uses unsupported binding kind '{kind}'",
+                        input.label
+                    ),
+                    false,
+                ))
+            }
+            None => input.default_value.clone(),
+        };
+        if input.required && value.trim().is_empty() {
+            return Err(tool_error(
+                format!("{} is required before this tool can run", input.label),
+                false,
+            ));
+        }
+        values.insert(input.key.clone(), value);
+    }
+    Ok(values)
+}
+
+fn await_generated_tool_approval(
+    app: &AppHandle,
+    approvals: &WorkflowApprovalState,
+    cancelled: Option<&AtomicBool>,
+    run_id: &str,
+    iteration: u64,
+    node: &WorkflowNode,
+    tool_ref: &GeneratedToolRef,
+    snapshot: &GeneratedToolSnapshot,
+    arguments: &HashMap<String, String>,
+) -> Result<(), MacActionResult> {
+    app_tools::verify_tool_fingerprint(tool_ref, snapshot)
+        .map_err(|error| tool_error(error, false))?;
+    let argument_digest = app_tools::digest_resolved_arguments(&tool_ref.fingerprint, arguments);
+    let approval_id = format!(
+        "approval-{}-{}",
+        std::process::id(),
+        APPROVAL_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let decision = Arc::new((Mutex::new(None), Condvar::new()));
+    let pending = PendingApproval {
+        run_id: run_id.to_string(),
+        iteration,
+        tool_fingerprint: tool_ref.fingerprint.clone(),
+        argument_digest: argument_digest.clone(),
+        decision: decision.clone(),
+    };
+    approvals
+        .0
+        .lock()
+        .map_err(|error| tool_error(error.to_string(), false))?
+        .insert(approval_id.clone(), pending);
+
+    let effects = snapshot
+        .effects
+        .iter()
+        .map(|effect| {
+            json!({
+                "type": effect.effect_type,
+                "description": effect.description,
+                "requiresApproval": effect.requires_approval,
+            })
+        })
+        .collect::<Vec<_>>();
+    println!(
+        "[Swirl][Tool][{} v{}] approval pending for '{}' (run={}, iteration={}, values=redacted)",
+        tool_ref.id, tool_ref.version, snapshot.target.application_name, run_id, iteration
+    );
+    emit(
+        app,
+        run_event(
+            "approval_required",
+            run_id,
+            iteration,
+            Some(node),
+            Some("running"),
+            Some(format!(
+                "Review {} before it controls {}",
+                node.title, snapshot.target.application_name
+            )),
+            Some(json!({
+                "approvalId": approval_id,
+                "runId": run_id,
+                "iteration": iteration,
+                "nodeId": node.id,
+                "toolId": tool_ref.id,
+                "toolVersion": tool_ref.version,
+                "toolFingerprint": tool_ref.fingerprint,
+                "argumentDigest": argument_digest,
+                "application": snapshot.target.application_name,
+                "bundleId": snapshot.target.bundle_id,
+                "effects": effects,
+                "permissions": snapshot.permissions,
+                "program": snapshot.program,
+                "risk": snapshot.risk,
+                "expiresAtMs": now_ms() + APPROVAL_TIMEOUT.as_millis(),
+            })),
+        ),
+    );
+
+    let deadline = std::time::Instant::now() + APPROVAL_TIMEOUT;
+    let (decision_lock, signal) = &*decision;
+    let mut resolved = decision_lock
+        .lock()
+        .map_err(|error| tool_error(error.to_string(), false))?;
+    loop {
+        if let Some(approved) = *resolved {
+            if approved {
+                println!(
+                    "[Swirl][Tool][{} v{}] one-shot approval granted (run={}, iteration={})",
+                    tool_ref.id, tool_ref.version, run_id, iteration
+                );
+                return Ok(());
+            }
+            return Err(tool_error("Tool execution was cancelled", false));
+        }
+        if cancelled.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            if let Ok(mut pending) = approvals.0.lock() {
+                pending.remove(&approval_id);
+            }
+            return Err(tool_error(
+                "Workflow stopped while awaiting approval",
+                false,
+            ));
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            if let Ok(mut pending) = approvals.0.lock() {
+                pending.remove(&approval_id);
+            }
+            return Err(tool_error(
+                "Tool approval expired after five minutes",
+                false,
+            ));
+        }
+        let wait_for = (deadline - now).min(Duration::from_millis(250));
+        let (guard, _) = signal
+            .wait_timeout(resolved, wait_for)
+            .map_err(|error| tool_error(error.to_string(), false))?;
+        resolved = guard;
+    }
+}
+
+fn run_app_agent(
+    node: &WorkflowNode,
+    _approved: bool,
+    _context: &mut Map<String, Value>,
+) -> Result<Value, MacActionResult> {
+    let application = node
+        .config
+        .get("application")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    Err(tool_error(
+        format!(
+            "Legacy App Agent for '{}' cannot execute raw generated scripts. Convert it to a reviewed tool in My Tools.",
+            if application.trim().is_empty() {
+                "this application"
+            } else {
+                application
+            }
+        ),
+        false,
+    ))
 }
 
 fn mcp_arguments(app: &AppHandle, node: &WorkflowNode, context: &Map<String, Value>) -> Value {
@@ -206,6 +511,67 @@ fn local_email_summary(input: &str, email: Option<&Value>) -> (String, Vec<Strin
     (formatted, action_items)
 }
 
+fn execute_generated_tool_node(
+    app: &AppHandle,
+    node: &WorkflowNode,
+    context: &mut Map<String, Value>,
+    run_id: &str,
+    iteration: u64,
+    cancelled: Option<&AtomicBool>,
+    approvals: &WorkflowApprovalState,
+) -> Result<Value, MacActionResult> {
+    let tool_ref = node
+        .tool_ref
+        .as_ref()
+        .ok_or_else(|| tool_error("Generated tool node is missing toolRef", false))?;
+    let snapshot = node
+        .tool_snapshot
+        .as_ref()
+        .ok_or_else(|| tool_error("Generated tool node is missing toolSnapshot", false))?;
+    let arguments = resolve_generated_tool_arguments(node, context)?;
+    let validation =
+        app_tools::validate_tool_snapshot(snapshot).map_err(|error| tool_error(error, false))?;
+    if !validation.valid {
+        return Err(tool_error(
+            format!(
+                "Pinned tool validation failed: {}",
+                validation.messages.join("; ")
+            ),
+            false,
+        ));
+    }
+    app_tools::log_tool_event(
+        tool_ref,
+        &snapshot.target,
+        "required",
+        0,
+        "validation",
+        0,
+        "success",
+    );
+    // Approvals are deliberately requested at execution time and consumed
+    // once. Workflow-level node preapproval is never honored for generated
+    // application tools, including continuous-trigger iterations.
+    await_generated_tool_approval(
+        app, approvals, cancelled, run_id, iteration, node, tool_ref, snapshot, &arguments,
+    )?;
+    let result = app_tools::execute_generated_app_tool(tool_ref, snapshot, &arguments)
+        .map_err(|error| tool_error(error, false))?;
+    let output = serde_json::to_value(&result).unwrap_or(Value::Null);
+    if let Some(text) = output
+        .get("output")
+        .and_then(|value| value.get("text"))
+        .and_then(Value::as_str)
+    {
+        context.insert("text".into(), Value::String(text.to_string()));
+    }
+    println!(
+        "[Swirl][Tool][{} v{}] completed for '{}' in {}ms (runtime values redacted)",
+        tool_ref.id, tool_ref.version, snapshot.target.application_name, result.duration_ms
+    );
+    Ok(output)
+}
+
 fn execute_node(
     app: &AppHandle,
     node: &WorkflowNode,
@@ -306,6 +672,15 @@ fn execute_node(
             Ok(output)
         }
         "mac" => {
+            if node.block_type == "generated_app_tool" {
+                return Err(tool_error(
+                    "Generated application tools require a one-shot workflow approval",
+                    true,
+                ));
+            }
+            if node.block_type == "mac_app_agent" {
+                return run_app_agent(node, approved, context);
+            }
             let mut params = node.config.clone();
             if let Some(object) = params.as_object_mut() {
                 if node.block_type == "mac_notes"
@@ -515,6 +890,84 @@ fn compile_prompt_blocking(
     Ok(generated)
 }
 
+fn is_tool_creation_prompt(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    lower.contains("tool")
+        && ["make", "create", "build", "generate"]
+            .iter()
+            .any(|verb| lower.contains(verb))
+}
+
+fn generate_app_tool_blocking(app: &AppHandle, prompt: String) -> Result<Value, String> {
+    let prompt = prompt.trim().to_string();
+    if prompt.is_empty() {
+        return Err("Describe the application tool you want to create".into());
+    }
+    if prompt.chars().count() > 4_000 {
+        return Err("Tool descriptions must be 4,000 characters or fewer".into());
+    }
+    let installed = app_tools::discover_installed_apps()?;
+    println!(
+        "[Swirl][ToolFactory] generating from {}-character prompt with {} installed application(s) available",
+        prompt.chars().count(),
+        installed.len()
+    );
+    let generated = jac_runtime::invoke(
+        app,
+        "generate-app-tool",
+        &json!({
+            "prompt": prompt,
+            "installedApplications": installed,
+        }),
+    )?;
+    let draft = generated
+        .get("draft")
+        .cloned()
+        .unwrap_or_else(|| generated.clone());
+    let prepared = app_tools::prepare_generated_tool_draft(generated)?;
+    let snapshot = prepared.snapshot();
+    let version = GeneratedAppToolVersion {
+        id: String::new(),
+        version: 0,
+        fingerprint: prepared.fingerprint.clone(),
+        name: prepared.name.clone(),
+        description: prepared.description.clone(),
+        source_prompt: prepared.source_prompt.clone(),
+        target: prepared.target.clone(),
+        inputs: prepared.inputs.clone(),
+        program: prepared.program.clone(),
+        effects: prepared.effects.clone(),
+        permissions: prepared.permissions.clone(),
+        risk: prepared.risk.clone(),
+        validation: prepared.validation.clone(),
+        test_status: prepared.test_status.clone(),
+        created_at: 0,
+    };
+    println!(
+        "[Swirl][ToolFactory] validated '{}' for {} ({}, {} input(s), {} step(s)); status=untested",
+        version.name,
+        prepared.target.application_name,
+        prepared.target.bundle_id,
+        version.inputs.len(),
+        version.program.len()
+    );
+    Ok(json!({
+        "draft": draft,
+        "version": version,
+        "toolRef": {
+            "id": "",
+            "version": 0,
+            "fingerprint": prepared.fingerprint,
+        },
+        "toolSnapshot": snapshot,
+        "target": prepared.target,
+        "compiledAutomation": prepared.compiled_automation.source,
+        "argumentOrder": prepared.compiled_automation.argv_order,
+        "validation": prepared.validation,
+        "testStatus": "untested",
+    }))
+}
+
 #[tauri::command]
 async fn compile_prompt(
     app: AppHandle,
@@ -524,6 +977,36 @@ async fn compile_prompt(
     tauri::async_runtime::spawn_blocking(move || compile_prompt_blocking(&app, prompt, use_llm))
         .await
         .map_err(|error| format!("Jac prompt compiler task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn generate_app_tool(app: AppHandle, prompt: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || generate_app_tool_blocking(&app, prompt))
+        .await
+        .map_err(|error| format!("Application tool generation task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn build_from_prompt(
+    app: AppHandle,
+    prompt: String,
+    use_llm: Option<bool>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if is_tool_creation_prompt(&prompt) {
+            Ok(json!({
+                "kind": "tool",
+                "tool": generate_app_tool_blocking(&app, prompt)?,
+            }))
+        } else {
+            Ok(json!({
+                "kind": "workflow",
+                "workflow": compile_prompt_blocking(&app, prompt, use_llm)?,
+            }))
+        }
+    })
+    .await
+    .map_err(|error| format!("Prompt builder task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -541,6 +1024,7 @@ fn execute_workflow(
     app: AppHandle,
     request: WorkflowExecutionRequest,
     mcp: State<'_, McpState>,
+    approval_state: State<'_, WorkflowApprovalState>,
 ) -> Result<ExecutionSummary, String> {
     let workflow_value =
         serde_json::to_value(&request.workflow).map_err(|error| error.to_string())?;
@@ -573,11 +1057,16 @@ fn execute_workflow(
     let mut results = HashMap::new();
     let mut completed = Vec::new();
     let mut failed_node_id = None;
+    let run_id = format!(
+        "run-{}-{}",
+        std::process::id(),
+        RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
 
     for node in &planned_nodes {
         println!(
-            "[Swirl][Workflow] starting node '{}' ({})",
-            node.title, node.category
+            "[Swirl][Workflow] starting node '{}' (type='{}', category='{}')",
+            node.title, node.block_type, node.category
         );
         context.insert(
             "customPrompt".into(),
@@ -595,13 +1084,26 @@ fn execute_workflow(
                 None,
             ),
         );
-        match execute_node(
-            &app,
-            node,
-            &mut context,
-            request.approvals.contains(&node.id),
-            &mcp,
-        ) {
+        let node_result = if node.block_type == "generated_app_tool" {
+            execute_generated_tool_node(
+                &app,
+                node,
+                &mut context,
+                &run_id,
+                1,
+                None,
+                approval_state.inner(),
+            )
+        } else {
+            execute_node(
+                &app,
+                node,
+                &mut context,
+                request.approvals.contains(&node.id),
+                &mcp,
+            )
+        };
+        match node_result {
             Ok(output) => {
                 let output = match output {
                     Value::Object(mut object) => {
@@ -613,7 +1115,11 @@ fn execute_workflow(
                     }
                     value => json!({ "result": value, "customPrompt": node.custom_prompt }),
                 };
-                println!("[Swirl][Workflow] completed node '{}'", node.title);
+                println!(
+                    "[Swirl][Workflow] completed node '{}' — output {}",
+                    node.title,
+                    output_summary(&output)
+                );
                 context.insert(format!("node:{}", node.id), output.clone());
                 results.insert(node.id.clone(), output.clone());
                 completed.push(node.id.clone());
@@ -687,7 +1193,7 @@ fn execute_workflow(
             Some(serde_json::to_value(&summary).unwrap_or(Value::Null)),
         ),
     );
-    let _ = storage::save_trace(&app, &serde_json::to_value(&summary).unwrap_or(Value::Null));
+    let _ = storage::save_trace(&app, &redacted_trace_summary(&summary));
     Ok(summary)
 }
 
@@ -719,6 +1225,14 @@ fn start_workflow(
         .to_string();
     if !matches!(run_mode.as_str(), "once" | "continuous") {
         return Err("Source runMode must be once or continuous".into());
+    }
+    let source_event_type = source
+        .config
+        .get("eventType")
+        .and_then(Value::as_str)
+        .unwrap_or("trigger_manual");
+    if source_event_type == "trigger_manual" && run_mode == "continuous" {
+        return Err("The Run button source supports one execution per button press".into());
     }
 
     let run_id = format!(
@@ -857,13 +1371,27 @@ fn start_workflow(
                     ),
                 );
                 let mcp = thread_app.state::<McpState>();
-                match execute_node(
-                    &thread_app,
-                    node,
-                    &mut context,
-                    request.approvals.contains(&node.id),
-                    &mcp,
-                ) {
+                let node_result = if node.block_type == "generated_app_tool" {
+                    let approval_state = thread_app.state::<WorkflowApprovalState>();
+                    execute_generated_tool_node(
+                        &thread_app,
+                        node,
+                        &mut context,
+                        &thread_run_id,
+                        iteration,
+                        Some(cancelled.as_ref()),
+                        approval_state.inner(),
+                    )
+                } else {
+                    execute_node(
+                        &thread_app,
+                        node,
+                        &mut context,
+                        request.approvals.contains(&node.id),
+                        &mcp,
+                    )
+                };
+                match node_result {
                     Ok(output) => {
                         println!(
                             "[Swirl][Workflow][{}] completed node '{}'",
@@ -923,7 +1451,7 @@ fn start_workflow(
                 failed_node_id,
             };
             let summary_value = serde_json::to_value(&summary).unwrap_or(Value::Null);
-            let _ = storage::save_trace(&thread_app, &summary_value);
+            let _ = storage::save_trace(&thread_app, &redacted_trace_summary(&summary));
             if !success {
                 emit(
                     &thread_app,
@@ -970,6 +1498,9 @@ fn start_workflow(
             iteration += 1;
         }
 
+        if cancelled.load(Ordering::Relaxed) {
+            terminal_event = "stopped";
+        }
         if terminal_event == "stopped" {
             println!("[Swirl][Workflow][{}] stopped", thread_run_id);
             emit(
@@ -1002,6 +1533,50 @@ fn stop_workflow(run_id: String, runs: State<'_, WorkflowRunState>) -> Result<Va
     cancelled.store(true, Ordering::Relaxed);
     println!("[Swirl][Workflow][{run_id}] stop requested");
     Ok(json!({ "stopped": true, "runId": run_id }))
+}
+
+#[tauri::command]
+fn resolve_workflow_approval(
+    request: ApprovalResolution,
+    approvals: State<'_, WorkflowApprovalState>,
+) -> Result<ApprovalResolutionResult, String> {
+    let pending = {
+        let mut active = approvals.0.lock().map_err(|error| error.to_string())?;
+        let pending = active
+            .get(&request.approval_id)
+            .ok_or_else(|| "This approval is no longer pending or was already used".to_string())?;
+        if pending.run_id != request.run_id
+            || pending.iteration != request.iteration
+            || pending.tool_fingerprint != request.tool_fingerprint
+            || pending.argument_digest != request.argument_digest
+        {
+            return Err(
+                "Approval binding mismatch; refresh the request instead of reusing it".into(),
+            );
+        }
+        active
+            .remove(&request.approval_id)
+            .expect("pending approval checked before removal")
+    };
+    let (decision, signal) = &*pending.decision;
+    *decision.lock().map_err(|error| error.to_string())? = Some(request.approved);
+    signal.notify_all();
+    println!(
+        "[Swirl][Approval][{}] {} for run={} iteration={} (arguments redacted)",
+        request.approval_id,
+        if request.approved {
+            "approved"
+        } else {
+            "cancelled"
+        },
+        request.run_id,
+        request.iteration
+    );
+    Ok(ApprovalResolutionResult {
+        resolved: true,
+        approval_id: request.approval_id,
+        approved: request.approved,
+    })
 }
 
 #[tauri::command]
@@ -1148,6 +1723,60 @@ fn delete_workflow(app: AppHandle, name: String) -> Result<bool, String> {
     storage::delete_workflow(&app, &name)
 }
 
+fn version_from_tool_preview(value: Value) -> Result<GeneratedAppToolVersion, String> {
+    serde_json::from_value(value.get("version").cloned().unwrap_or(value))
+        .map_err(|error| format!("Generated tool preview is malformed: {error}"))
+}
+
+#[tauri::command]
+fn create_app_tool(app: AppHandle, draft: Value) -> Result<GeneratedAppToolRecord, String> {
+    let version = version_from_tool_preview(draft)?;
+    storage::create_app_tool(&app, &version)
+}
+
+#[tauri::command]
+fn list_app_tools(app: AppHandle) -> Result<Vec<GeneratedAppToolRecord>, String> {
+    storage::list_app_tools(&app)
+}
+
+#[tauri::command]
+fn load_app_tool(
+    app: AppHandle,
+    tool_id: String,
+    version: Option<u64>,
+) -> Result<GeneratedAppToolVersion, String> {
+    storage::load_app_tool(&app, &tool_id, version)
+}
+
+#[tauri::command]
+fn publish_app_tool_version(
+    app: AppHandle,
+    tool_id: String,
+    draft: Value,
+) -> Result<GeneratedAppToolRecord, String> {
+    let mut version = version_from_tool_preview(draft)?;
+    version.id = tool_id.clone();
+    storage::publish_app_tool_version(&app, &tool_id, &version)
+}
+
+#[tauri::command]
+fn archive_app_tool(app: AppHandle, tool_id: String) -> Result<bool, String> {
+    storage::archive_app_tool(&app, &tool_id)
+}
+
+#[tauri::command]
+fn check_app_tool(app: AppHandle, tool_id: String, version: Option<u64>) -> Result<Value, String> {
+    let version = storage::load_app_tool(&app, &tool_id, version)?;
+    let snapshot = version.snapshot();
+    app_tools::verify_tool_fingerprint(&version.tool_ref(), &snapshot)?;
+    let check = app_tools::check_app_connection(&snapshot.target)?;
+    println!(
+        "[Swirl][Tool][{} v{}] connection check for '{}' completed (no UI action executed)",
+        version.id, version.version, snapshot.target.application_name
+    );
+    serde_json::to_value(check).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn toggle_notch(app: AppHandle) -> Result<bool, String> {
     if let Some(notch_window) = app.get_webview_window("notch") {
@@ -1178,6 +1807,7 @@ fn main() {
                 builtins,
             ))));
             app.manage(WorkflowRunState::default());
+            app.manage(WorkflowApprovalState::default());
 
             if let Some(notch_win) = app.get_webview_window("notch") {
                 if let Ok(Some(monitor)) = notch_win.primary_monitor() {
@@ -1217,10 +1847,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_health,
             compile_prompt,
+            build_from_prompt,
+            generate_app_tool,
             generate_jac_source,
             execute_workflow,
             start_workflow,
             stop_workflow,
+            resolve_workflow_approval,
             execute_mac_action,
             execute_mac_applescript,
             execute_mac_shell,
@@ -1235,6 +1868,12 @@ fn main() {
             load_workflow,
             list_workflows,
             delete_workflow,
+            create_app_tool,
+            list_app_tools,
+            load_app_tool,
+            publish_app_tool_version,
+            archive_app_tool,
+            check_app_tool,
             toggle_notch
         ])
         .build(tauri::generate_context!())
@@ -1248,6 +1887,15 @@ fn main() {
             if let Ok(active) = app_handle.state::<WorkflowRunState>().0.lock() {
                 for cancelled in active.values() {
                     cancelled.store(true, Ordering::Relaxed);
+                }
+            }
+            if let Ok(mut approvals) = app_handle.state::<WorkflowApprovalState>().0.lock() {
+                for pending in approvals.drain().map(|(_, pending)| pending) {
+                    let (decision, signal) = &*pending.decision;
+                    if let Ok(mut value) = decision.lock() {
+                        *value = Some(false);
+                        signal.notify_all();
+                    }
                 }
             }
             if let Ok(mut manager) = app_handle.state::<McpState>().0.lock() {
@@ -1276,5 +1924,26 @@ mod execution_tests {
         assert!(summary.contains("Action items:"));
         assert_eq!(actions.len(), 1);
         assert!(!summary.contains("LLM transform prepared"));
+    }
+
+    #[test]
+    fn persisted_trace_summary_redacts_runtime_values() {
+        let summary = ExecutionSummary {
+            success: true,
+            context: json!({
+                "text": "private message",
+                "recipient": "friend@example.com"
+            }),
+            results: HashMap::from([(
+                "tool-node".into(),
+                json!({ "output": { "message": "private message" } }),
+            )]),
+            completed_node_ids: vec!["tool-node".into()],
+            failed_node_id: None,
+        };
+        let stored = serde_json::to_string(&redacted_trace_summary(&summary)).unwrap();
+        assert!(!stored.contains("private message"));
+        assert!(!stored.contains("friend@example.com"));
+        assert!(stored.contains("valuesRedacted"));
     }
 }
