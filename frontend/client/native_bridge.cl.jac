@@ -27,6 +27,84 @@ async def:pub compile_workflow_prompt(prompt: str, use_llm: bool = True) -> any 
 }
 
 
+async def:pub build_from_prompt(prompt: str, use_llm: bool = True) -> any {
+    return await invoke_backend(
+        "build_from_prompt",
+        {"prompt": prompt, "useLlm": use_llm},
+    );
+}
+
+
+async def:pub generate_application_tool(
+    prompt: str,
+    tool_id: str = "",
+) -> any {
+    return await invoke_backend(
+        "generate_app_tool",
+        {"prompt": prompt},
+    );
+}
+
+
+async def:pub create_generated_tool(draft: dict) -> any {
+    return await invoke_backend("create_app_tool", {"draft": draft});
+}
+
+
+async def:pub list_generated_tools -> list {
+    return await invoke_backend("list_app_tools") as list;
+}
+
+
+async def:pub load_generated_tool(
+    tool_id: str,
+    version: int | None = None,
+) -> any {
+    return await invoke_backend(
+        "load_app_tool",
+        {"toolId": tool_id, "version": version},
+    );
+}
+
+
+async def:pub publish_generated_tool(
+    tool_id: str,
+    draft: dict,
+) -> any {
+    return await invoke_backend(
+        "publish_app_tool_version",
+        {"toolId": tool_id, "draft": draft},
+    );
+}
+
+
+async def:pub archive_generated_tool(tool_id: str) -> bool {
+    return await invoke_backend(
+        "archive_app_tool",
+        {"toolId": tool_id},
+    ) as bool;
+}
+
+
+async def:pub check_generated_tool(
+    tool_id: str,
+    version: int | None = None,
+) -> any {
+    return await invoke_backend(
+        "check_app_tool",
+        {"toolId": tool_id, "version": version},
+    );
+}
+
+
+async def:pub resolve_workflow_approval(request: dict) -> any {
+    return await invoke_backend(
+        "resolve_workflow_approval",
+        {"request": request},
+    );
+}
+
+
 async def:pub start_workflow(
     workflow: dict,
     context: dict = {},

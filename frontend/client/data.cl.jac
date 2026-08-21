@@ -4,6 +4,219 @@ glob SOURCE_ID: str = "workflow-source";
 glob MAX_WORKFLOW_NAME_LENGTH: int = 80;
 glob GENERATED_WORKFLOW_PREFIX: str = "AI - ";
 
+
+def:pub is_tool_creation_intent(prompt: str) -> bool {
+    lowered: str = prompt.strip().lower();
+    if "tool" not in lowered {
+        return False;
+    }
+    verbs: list[str] = [
+        "make", "create", "build", "generate", "add", "design",
+    ];
+    return `any(verb in lowered for verb in verbs);
+}
+
+
+def _tool_dict(value: any) -> dict {
+    return value as dict if isinstance(value, dict) else {};
+}
+
+
+def:pub generated_tool_record(value: any) -> dict {
+    candidate: dict = _tool_dict(value);
+    for key in ["record", "tool"] {
+        nested: any = candidate.get(key);
+        if isinstance(nested, dict) {
+            return nested as dict;
+        }
+    }
+    return candidate;
+}
+
+
+def:pub generated_tool_id(value: any) -> str {
+    record: dict = generated_tool_record(value);
+    return str(
+        record.get("id")
+        or record.get("toolId")
+        or (_tool_dict(record.get("toolRef"))).get("id")
+        or ""
+    );
+}
+
+
+def:pub generated_tool_version(value: any) -> dict {
+    record: dict = generated_tool_record(value);
+    version_preview: any = record.get("version");
+    if isinstance(version_preview, dict) {
+        return version_preview as dict;
+    }
+    direct: any = record.get("toolSnapshot") or record.get("snapshot");
+    if isinstance(direct, dict) {
+        return direct as dict;
+    }
+    published: any = record.get("publishedVersion") or record.get("latest");
+    if isinstance(published, dict) {
+        return published as dict;
+    }
+    versions: list = (
+        record.get("versions") as list
+        if isinstance(record.get("versions"), list)
+        else []
+    );
+    if versions {
+        requested: int = int(record.get("latestVersion") or 0);
+        for candidate in versions {
+            version_spec: dict = _tool_dict(candidate);
+            if requested and int(version_spec.get("version") or 0) == requested {
+                return version_spec;
+            }
+        }
+        return _tool_dict(versions[len(versions) - 1]);
+    }
+    draft: any = record.get("draft");
+    if isinstance(draft, dict) {
+        return draft as dict;
+    }
+    return record;
+}
+
+
+def:pub generated_tool_version_number(value: any) -> int {
+    record: dict = generated_tool_record(value);
+    snapshot: dict = generated_tool_version(record);
+    return int(
+        snapshot.get("version")
+        or record.get("latestVersion")
+        or record.get("version")
+        or 1
+    );
+}
+
+
+def:pub generated_tool_inputs(value: any) -> list[dict] {
+    snapshot: dict = generated_tool_version(value);
+    raw_inputs: any = snapshot.get("inputs") or snapshot.get("inputDefinitions");
+    if isinstance(raw_inputs, list) {
+        return [
+            _tool_dict(item)
+            for item in (raw_inputs as list)
+            if isinstance(item, dict)
+        ];
+    }
+    if isinstance(raw_inputs, dict) {
+        return [
+            {
+                "key": str(entry[0]),
+                **_tool_dict(entry[1]),
+            }
+            for entry in (Object.entries(raw_inputs) as list[list])  # jac:ignore[W2001,W6002]
+        ];
+    }
+    return [];
+}
+
+
+def:pub generated_tool_name(value: any) -> str {
+    record: dict = generated_tool_record(value);
+    snapshot: dict = generated_tool_version(record);
+    return str(
+        record.get("displayName")
+        or record.get("name")
+        or snapshot.get("displayName")
+        or snapshot.get("name")
+        or "Untitled Tool"
+    );
+}
+
+
+def:pub generated_tool_description(value: any) -> str {
+    record: dict = generated_tool_record(value);
+    snapshot: dict = generated_tool_version(record);
+    return str(
+        record.get("description")
+        or snapshot.get("description")
+        or "Reusable macOS application action"
+    );
+}
+
+
+def:pub generated_tool_status(value: any) -> str {
+    record: dict = generated_tool_record(value);
+    snapshot: dict = generated_tool_version(record);
+    raw_status: any = (
+        snapshot.get("testStatus")
+        or record.get("testStatus")
+        or snapshot.get("status")
+        or record.get("status")
+        or "untested"
+    );
+    if isinstance(raw_status, dict) {
+        return str(
+            (raw_status as dict).get("status")
+            or (raw_status as dict).get("state")
+            or "untested"
+        ).lower();
+    }
+    return str(raw_status).lower();
+}
+
+
+def:pub generated_tool_palette_block(value: any) -> dict {
+    record: dict = generated_tool_record(value);
+    snapshot: dict = {
+        **generated_tool_version(record),
+        "id": generated_tool_id(record),
+        "displayName": generated_tool_name(record),
+        "description": generated_tool_description(record),
+    };
+    tool_id: str = generated_tool_id(record);
+    version: int = generated_tool_version_number(record);
+    bindings: dict = {};
+    for input_spec in generated_tool_inputs(snapshot) {
+        key: str = str(input_spec.get("key") or input_spec.get("name") or "");
+        if key {
+            bindings[key] = (
+                {"kind": "context", "path": "text"}
+                if key in ["message", "text", "content"]
+                else {
+                    "kind": "literal",
+                    "value": input_spec.get(
+                        "defaultValue",
+                        input_spec.get("default", ""),
+                    ),
+                }
+            );
+        }
+    }
+    return {
+        "paletteId": "generated:" + tool_id + ":" + str(version),
+        "type": "generated_app_tool",
+        "category": "mac",
+        "title": generated_tool_name(record),
+        "subtitle": "My Tool · v" + str(version),
+        "description": generated_tool_description(record),
+        "jacNode": "MacAppBlock",
+        "inputs": [
+            str(spec.get("key") or spec.get("name") or "")
+            for spec in generated_tool_inputs(snapshot)
+        ],
+        "outputs": ["status", "result"],
+        "toolRef": {
+            "id": tool_id,
+            "version": version,
+            "fingerprint": (
+                snapshot.get("fingerprint")
+                or (_tool_dict(record.get("toolRef"))).get("fingerprint")
+                or ""
+            ),
+        },
+        "toolSnapshot": snapshot,
+        "config": {"bindings": bindings},
+        "status": generated_tool_status(record),
+    };
+}
+
 glob:pub BLOCK_CATEGORIES: list[dict] = [
     {
         "id": "source",
@@ -207,6 +420,12 @@ glob:pub BLOCK_LIBRARY: list[dict] = [
 ];
 
 glob:pub SOURCE_EVENTS: dict[str, dict] = {
+    "trigger_manual": {
+        "type": "trigger_manual",
+        "title": "On Run Button",
+        "description": "Start immediately when you press Run.",
+        "config": {},
+    },
     "trigger_email": {
         "type": "trigger_email",
         "title": "On Email Received",
@@ -281,6 +500,28 @@ glob:pub SOURCE_EVENTS: dict[str, dict] = {
     },
 };
 
+
+def:pub trigger_block_library -> list[dict] {
+    return [
+        {
+            "type": str(entry[0]),
+            "category": "trigger",
+            "title": str((entry[1] as dict)["title"]),
+            "subtitle": "Workflow Source Event",
+            "description": str((entry[1] as dict)["description"]),
+            "jacNode": "SourceBlock",
+            "inputs": [],
+            "outputs": ["event"],
+            "config": {
+                "eventType": str(entry[0]),
+                "runMode": "once",
+                **clone_json((entry[1] as dict)["config"] as dict),
+            },
+        }
+        for entry in (Object.entries(SOURCE_EVENTS) as list[list])  # jac:ignore[W2001,W6002]
+    ];
+}
+
 glob:pub INITIAL_NODES: list[dict] = [
     {
         "id": "workflow-on-run",
@@ -291,12 +532,8 @@ glob:pub INITIAL_NODES: list[dict] = [
         "x": 60,
         "y": 120,
         "config": {
-            "eventType": "trigger_email",
+            "eventType": "trigger_manual",
             "runMode": "once",
-            "mailbox": "Inbox",
-            "filterSubject": "",
-            "checkIntervalSec": 15,
-            "waitTimeoutSec": 0,
         },
         "status": "idle",
     },
@@ -319,8 +556,8 @@ def clone_json(value: any) -> any {
 }
 
 
-def source_config(event_type: str = "trigger_email", config: dict = {}) -> dict {
-    normalized: str = event_type if event_type in SOURCE_EVENTS else "trigger_email";
+def source_config(event_type: str = "trigger_manual", config: dict = {}) -> dict {
+    normalized: str = event_type if event_type in SOURCE_EVENTS else "trigger_manual";
     defaults: dict = clone_json(SOURCE_EVENTS[normalized]["config"]) as dict;
     return {
         "eventType": normalized,
@@ -333,7 +570,11 @@ def source_config(event_type: str = "trigger_email", config: dict = {}) -> dict 
 
 def:pub change_source_event(event_type: str, current: dict = {}) -> dict {
     run_mode: str = (
-        "continuous" if current.get("runMode") == "continuous" else "once"
+        "once"
+        if event_type == "trigger_manual"
+        else (
+            "continuous" if current.get("runMode") == "continuous" else "once"
+        )
     );
     return source_config(
         event_type,
@@ -380,7 +621,7 @@ def create_source_node(
     x: float = 32.0,
     y: float = 140.0,
 ) -> dict {
-    event_type: str = str(config.get("eventType") or "trigger_email");
+    event_type: str = str(config.get("eventType") or "trigger_manual");
     return {
         "id": SOURCE_ID,
         "type": "source",
@@ -400,7 +641,7 @@ def legacy_trigger_to_source(trigger: dict) -> dict {
     event_type: str = (
         str(trigger.get("type"))
         if trigger.get("type") in SOURCE_EVENTS
-        else "trigger_email"
+        else "trigger_manual"
     );
     positioned: dict = normalize_node_position(trigger, 32.0, 140.0);
     trigger_config: dict = (
@@ -459,7 +700,7 @@ def:pub normalize_workflow(nodes: list = [], edges: list = []) -> dict {
         str((source.get("config") as dict).get("eventType"))
         if isinstance(source.get("config"), dict)
             and (source.get("config") as dict).get("eventType")
-        else "trigger_email"
+        else "trigger_manual"
     );
     source = {
         **source,
@@ -586,7 +827,7 @@ def:pub suggest_generated_workflow_name(prompt: str) -> str {
     );
     cleaned: str = "".join([
         character if character in allowed else " "
-        for character in prompt
+        for character in prompt.split("")
     ]);
     cleaned = " ".join(cleaned.split());
     title: str = cleaned or "Generated Workflow";
